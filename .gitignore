@@ -1,0 +1,7 @@
+.env
+work/
+.venv/
+__pycache__/
+unity-5.mp4
+handDrawnStyle.jpeg
+.pi/skills/
