@@ -5,12 +5,12 @@ import subprocess
 
 
 def probe(path: str) -> dict:
-    out = subprocess.check_output([
+    r = subprocess.run([
         "ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height,r_frame_rate,duration:format=duration",
         "-of", "json", path,
-    ])
-    d = json.loads(out)
+    ], capture_output=True, text=True, check=True)
+    d = json.loads(r.stdout)
     s = d["streams"][0]
     num, den = s["r_frame_rate"].split("/")
     return {

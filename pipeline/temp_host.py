@@ -7,9 +7,11 @@ import requests
 
 def tmp_upload(local: str, name: str) -> str:
     """Upload to transfer.sh. Swap the body if you use a different temp host or a tunnel."""
-    url = subprocess.check_output(
-        ["curl", "-sS", "--upload-file", local, f"https://transfer.sh/{name}"]
-    ).decode().strip()
+    r = subprocess.run(
+        ["curl", "-sS", "--upload-file", local, f"https://transfer.sh/{name}"],
+        capture_output=True, text=True, check=True,
+    )
+    url = r.stdout.strip()
     if not url.startswith("http"):
         raise RuntimeError(f"temp upload failed: {url}")
     # verify HEAD
