@@ -16,7 +16,7 @@ Full spec: `.pi/plan.md`.
 ```
 run_pipeline.py        # end-to-end runner (plan §15)
 pipeline/
-  temp_host.py         # Module 0 — temp-host upload helper (§4)
+  temp_host.py         # Module 0 — temp file hosting via cloudflared tunnel (§4)
   probe.py             # Module 1 — ffprobe input (§5)
   preprocess.py        # Module 2 — optional resize/transcode (§6)
   audio.py             # Module 3 — audio extraction (§7)
@@ -31,6 +31,7 @@ pipeline/
 ## Prerequisites
 
 - `ffmpeg` / `ffprobe` on PATH
+- `cloudflared` (`brew install cloudflared`) — quick tunnel for temp file hosting
 - Python 3.10+, `pip install -r requirements.txt`
 - BytePlus ModelArk API key (see plan §2.2)
 
