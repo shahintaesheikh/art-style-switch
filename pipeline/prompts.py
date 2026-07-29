@@ -6,7 +6,7 @@ Redraw the provided gameplay frame in the exact hand-drawn sketch style of the r
 Style requirements (match the reference image exactly):
 - Medium: pencil and colored-pencil sketch on off-white paper; visible paper grain.
 - Line work: fine graphite hatching and cross-hatching for all shading; sketchy, slightly irregular outlines as if drawn by hand with a soft pencil; no clean vector lines, no cel-shading, no 3D-rendered look.
-- Color: the player's red car must be filled with red colored-pencil strokes (same crimson tone as the reference, hatched, not flat fill); buildings are drawn with graphite hatching over a pale cream/white base with windows picked out in small colored-pencil squares (yellows, light blues, pinks, greys) matching the reference; sky is a light-blue colored-pencil wash; road is graphite hatching with radial speed/motion strokes converging toward the vanishing point; distant blue cars are blue colored-pencil with the same hatching treatment.
+- Color: the player's red car must be filled with red colored-pencil strokes (same crimson tone as the reference, hatched, not flat fill); blue cars are blue colored-pencil with the same hatching treatment; buildings are drawn with graphite hatching over a pale cream/white base with windows picked out in small colored-pencil squares (yellows, light blues, pinks, greys) matching the reference; sky is a light-blue colored-pencil wash; road is graphite hatching with radial speed/motion strokes converging toward the vanishing point.
 - Shading: all shadows and gradients produced by pencil stroke density, not by smooth gradients or lighting models.
 - Texture: visible pencil stroke direction; slight paper-tooth texture under the color; subtle hand-made imperfection (slightly wobbly lines, minor stroke overflow).
 
@@ -22,7 +22,7 @@ Output: 3:4 portrait matching the input aspect ratio, no watermark, no border, n
 """
 
 SEEDANCE_PROMPT = """\
-【Global setup】Output portrait 3:4. The reference_video provides camera, motion, composition, timing, object positions, occlusion, car movement, road perspective, and all editing structure ONLY — do NOT carry over any of its 3D-rendered look, flat shading, smooth gradients, or game-engine lighting. The three reference_images define the visual style and color treatment for the entire clip — every frame of the output must look like it was hand-drawn in that exact pencil + colored-pencil sketch style.
+【Global setup】Output portrait 3:4. The reference_video provides camera, motion, composition, timing, object positions, occlusion, car movement, road perspective, and all editing structure ONLY — do NOT carry over any of its 3D-rendered look, flat shading, smooth gradients, or game-engine lighting. The three reference_images define the visual style and color treatment for the entire clip — every frame of the output must look like it was hand-drawn in that exact pencil + colored-pencil sketch style. Object positions, scale, and motion come ONLY from reference_video — never copy object placement or composition from the reference_images.
 
 【Per-frame style rules】Every single output frame must be fully redrawn in the hand-drawn sketch style of the reference images:
 - Medium: pencil and colored-pencil on off-white paper; subtle paper grain visible throughout.
@@ -37,7 +37,7 @@ SEEDANCE_PROMPT = """\
 Interpolate the style smoothly between these anchors; style, stroke weight, paper color, and palette must remain perceptually identical from the first frame to the last — no drift toward 3D, photorealism, or a different art style at any point.
 
 【Content preservation — strict】
-- Preserve the camera dolly / forward motion exactly as in reference_video; preserve the road vanishing point, building placement on both sides, the player red car's position (centered lower-frame) and speed, every oncoming blue car's timing of entry, position, scale, and count.
+- Preserve the camera dolly / forward motion exactly as in reference_video; preserve the road vanishing point, building placement on both sides, the player red car's exact per-frame position, trajectory, and speed as in reference_video (the car shifts across the frame with steering and camera motion — do NOT pin it to the center of the frame), every oncoming blue car's timing of entry, position, scale, and count.
 - Preserve the exact colors of objects: player car red, NPC cars blue, sky light blue, buildings cream/grey with colored window panes.
 - Do NOT add people, animals, signs, UI elements, lens flares, speed lines that weren't in the source, or any extra objects. Do NOT remove or relocate any object present in the source.
 - Do NOT change the pacing, timing, or action.
