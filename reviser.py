@@ -580,10 +580,64 @@ def _reviser_prompt_hash() -> str:
     return hashlib.sha256((REVISER_SYSTEM_PROMPT + VERSION).encode("utf-8")).hexdigest()
 
 
-def _reviser_skills(args) -> list:
+def upload_skill_zip(zip_path: str, api_key: str) -> str:
+    """Upload a custom skill zip to the Managed Agents Skills API.
+
+    POST /api/v3/skills with multipart/form-data; returns the skill ID
+    (e.g. "skill-20260702082507-x6vpp").
+    """
+    url = f"{INFERENCE_BASE_URL}/skills"
+    with open(zip_path, "rb") as f:
+        resp = _request(
+            "upload_skill", "POST", url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            files={"files": (os.path.basename(zip_path), f, "application/zip")},
+            timeout=120,
+        )
+    return resp["id"]
+
+
+def _skill_zip_hash(zip_path: str) -> str:
+    """SHA-256 of the zip file content, for cache-keying."""
+    return hashlib.sha256(Path(zip_path).read_bytes()).hexdigest()
+
+
+def _resolve_skill_ids(args) -> list[str]:
+    """Resolve all skill IDs to attach to the Reviser agent.
+
+    Combines:
+    - Pre-existing skill IDs from --seedream-prompt-skill-id
+    - Zip files from --skill-zip (uploaded if not yet cached)
+
+    Skill zips are uploaded once and cached in agents.json by content hash.
+    """
+    skill_ids: list[str] = []
+
+    # Pre-existing skill ID
     if args.seedream_prompt_skill_id:
-        return [{"type": "custom", "skill_id": args.seedream_prompt_skill_id}]
-    return []
+        skill_ids.append(args.seedream_prompt_skill_id)
+
+    # Skill zip files — upload if not cached
+    zip_paths: list[str] = getattr(args, "skill_zip", None) or []
+    if zip_paths:
+        cache = _load_cache()
+        skill_zip_cache: dict[str, str] = cache.get("skill_zip_cache", {})
+        for zp in zip_paths:
+            zhash = _skill_zip_hash(zp)
+            if zhash in skill_zip_cache:
+                skill_ids.append(skill_zip_cache[zhash])
+            else:
+                sid = upload_skill_zip(zp, args.ark_api_key)
+                skill_zip_cache[zhash] = sid
+                skill_ids.append(sid)
+        cache["skill_zip_cache"] = skill_zip_cache
+        _write_cache(cache)
+
+    return skill_ids
+
+
+def _reviser_skills(skill_ids: list[str]) -> list:
+    return [{"type": "custom", "skill_id": sid} for sid in skill_ids]
 
 
 def create_environment(args) -> str:
@@ -617,7 +671,7 @@ def create_environment(args) -> str:
     raise InfraError("create_environment", "409 conflict but no existing env found by name")
 
 
-def create_reviser_agent(args) -> tuple[str, int]:
+def create_reviser_agent(args, skill_ids: list[str]) -> tuple[str, int]:
     resp = _request(
         "create_agent", "POST", f"{INFERENCE_BASE_URL}/agents",
         headers=_ark_headers(args.ark_api_key),
@@ -627,13 +681,13 @@ def create_reviser_agent(args) -> tuple[str, int]:
             "model": {"id": MODEL_ID, "speed": "standard"},
             "system": REVISER_SYSTEM_PROMPT,
             "tools": REVISER_TOOLS,  # 3 type:"custom" entries only — no built-in toolset (Q19)
-            "skills": _reviser_skills(args),
+            "skills": _reviser_skills(skill_ids),
         },
     )
     return resp["id"], resp.get("version", 1)
 
 
-def update_reviser_agent(args, agent_id: str) -> int:
+def update_reviser_agent(args, agent_id: str, skill_ids: list[str]) -> int:
     """Version-drift PUT (plan §10.5): push current prompt/tools/skills."""
     current = _request("get_agent", "GET", f"{INFERENCE_BASE_URL}/agents/{agent_id}",
                        headers=_ark_headers(args.ark_api_key))
@@ -644,7 +698,7 @@ def update_reviser_agent(args, agent_id: str) -> int:
             "version": current["version"],
             "system": REVISER_SYSTEM_PROMPT,
             "tools": REVISER_TOOLS,
-            "skills": _reviser_skills(args),
+            "skills": _reviser_skills(skill_ids),
         },
     )
     return resp.get("version", current["version"] + 1)
@@ -658,19 +712,32 @@ def bootstrap_reviser(args) -> tuple[str, str]:
     prompt_hash = _reviser_prompt_hash()
     agent_id = args.reviser_agent_id or cache.get("reviser_agent_id")
     env_id = args.environment_id or cache.get("environment_id")
+
+    # Resolve skill IDs (upload zips if needed, combine with pre-existing IDs)
+    skill_ids = _resolve_skill_ids(args)
+
     if not env_id:
         env_id = create_environment(args)
+
+    # Check if agent exists and prompt hash matches
     if agent_id and cache.get("reviser_prompt_hash") == prompt_hash:
+        # Still need to update skills if they changed (skill zips may have been re-uploaded)
+        cached_skill_ids = cache.get("reviser_skill_ids", [])
+        if sorted(skill_ids) != sorted(cached_skill_ids):
+            version = update_reviser_agent(args, agent_id, skill_ids)
+            cache["reviser_version"] = version
         return agent_id, env_id  # cache hit
+
     if agent_id:  # version/prompt drift → PUT update (§10.5)
-        version = update_reviser_agent(args, agent_id)
+        version = update_reviser_agent(args, agent_id, skill_ids)
     else:
-        agent_id, version = create_reviser_agent(args)
+        agent_id, version = create_reviser_agent(args, skill_ids)
     cache.update({
         "reviser_agent_id": agent_id,
         "reviser_version": version,
         "environment_id": env_id,
         "reviser_prompt_hash": prompt_hash,
+        "reviser_skill_ids": skill_ids,
         "version": VERSION,
     })
     _write_cache(cache)
@@ -1187,6 +1254,9 @@ def parse_args(argv=None):
     p.add_argument("--environment-id", help="override cached/bootstrapped environment")
     p.add_argument("--seedream-prompt-skill-id",
                    help="ModelArk custom Skill ID attached to the Reviser (Q33)")
+    p.add_argument("--skill-zip", action="append", default=[],
+                   help="Path to a custom Skill zip file to upload and attach to the "
+                        "Reviser agent. Can be specified multiple times.")
     p.add_argument("--ffmpeg-path", default="ffmpeg")
     p.add_argument("--ffprobe-path", default="ffprobe")
     args = p.parse_args(argv)
