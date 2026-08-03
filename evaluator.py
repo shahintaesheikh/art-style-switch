@@ -56,8 +56,9 @@ INFRA_MAX_RETRIES = 1     # Q28 (retry once)
 ANCHOR_IDS = ("A0", "A1", "A2")  # Q42 (fixed 3 anchors for v1)
 
 # Rubric thresholds (plan §3). Hard gates must be exactly 5; soft gates >= 4.
-HARD_GATE_MIN = {"geometry": 5, "composition": 5}
-SOFT_GATE_MIN = {"medium": 4, "palette": 4, "line_quality": 4}
+# medium and palette are now hard gates — style must match the reference exactly.
+HARD_GATE_MIN = {"geometry": 5, "composition": 5, "medium": 5, "line_quality": 5}
+SOFT_GATE_MIN = {"palette": 4}
 ALL_DIMENSIONS = ("medium", "palette", "line_quality", "geometry", "composition")
 
 # Minimal sandboxed Environment (Q19). Smoke test resolved the plan §17 open
@@ -83,9 +84,9 @@ EVALUATOR_SYSTEM_PROMPT = """You are the Keyframe QC Evaluator in a style-transf
 ## Rubric — 5 dimensions, each scored 1–5
 - geometry: object count, positions, orientations, and vanishing point in the styled keyframe match its raw frame 1:1. Any added/removed/moved/rotated/resized/morphed object is a defect.
 - composition: same framing, zoom, and crop as the raw frame; 3:4 aspect; no letterboxing.
-- medium: rendering medium matches the target style (e.g. pencil + colored-pencil, anime cel, oil, photorealism, watercolor). Drift to a different medium is a defect even if the result looks attractive.
+- medium: rendering medium matches the target style EXACTLY (e.g. pencil + colored-pencil, anime cel, oil, photorealism, watercolor). ANY drift to a different medium is a defect — even if the result looks attractive, if the medium is not identical to the reference it must score ≤4. The medium must be perceptually indistinguishable. Cross-anchor medium CONSISTENCY is paramount — the styled keyframes must share one uniform medium across all anchors. A set of keyframes with a consistent medium (even slightly off from the reference) is BETTER than a set where some anchors match exactly and others drift. Penalize any anchor whose medium deviates from the other anchors' medium.
 - palette: color treatment matches the target style (e.g. hatched crimson vs flat red, graphite-on-cream vs saturated color).
-- line_quality: mark/edge character matches the target style (e.g. sketchy graphite for pencil, clean cel lines for anime, painterly edges for oil).
+- line_quality: mark/edge character matches the target style EXACTLY (e.g. sketchy graphite for pencil, clean cel lines for anime, painterly edges for oil). ANY deviation in linework character is a defect — the stroke type, edge quality, and mark-making must be perceptually indistinguishable from the reference.
 
 ### Score anchors (apply to every dimension)
 - 5 = matches the reference exactly on this dimension; no detectable deviation.
@@ -94,7 +95,11 @@ EVALUATOR_SYSTEM_PROMPT = """You are the Keyframe QC Evaluator in a style-transf
 - 2 = largely wrong; only traces of the target remain.
 - 1 = completely wrong on this dimension.
 
+### Hard gate note
+Medium and line_quality are also hard gates (minimum 5). A score of 4 on medium or line_quality means the style does not match the reference exactly and counts as a failure — even if the deviation is subtle.
+
 ## Scoring rules
+- MEDIUM/ART STYLE CONSISTENCY ACROSS ANCHORS IS A HARD REQUIREMENT. The final video interpolates style between these anchors, so any medium switching between anchors produces visible style jumps in the output. A keyframe that uses a different medium than its sibling anchors is a defect on its own medium score even if it individually matches the reference better. Uniformly "pretty close but consistent" beats "sometimes exact, sometimes off" with the video flickering between styles. Flag any cross-anchor medium drift in `cross_anchor_coherence_notes` and factor it into the affected anchor's medium score.
 - Compare geometry and composition ONLY against the raw frame for the same anchor. Compare medium, palette, and line_quality ONLY against the style reference.
 - Score every keyframe tagged `[NEW ...]` on all 5 dimensions. NEVER rescore keyframes tagged `[previously approved ...]` and never include them in the `keyframes` array — use them only as visual context for cross-anchor coherence.
 - Be strict and evidence-based. Rationales must cite concrete visual evidence (e.g. "the left car is rotated ~15° vs the raw frame", "palette is saturated digital color, not graphite-on-cream"), not vibes.
@@ -268,9 +273,9 @@ def bootstrap_evaluator(client: ArkClient,
     if agent_id:
         # version drift (§10.5): PUT updated prompt with current version
         current = client.request("GET", f"/agents/{agent_id}", stage="bootstrap")
-        updated = client.request("PUT", f"/agents/{agent_id}", stage="bootstrap",
-                                 json={"version": int(current["version"]),
-                                       "system": EVALUATOR_SYSTEM_PROMPT})
+        updated = client.request("POST", f"/agents/{agent_id}", stage="bootstrap",
+                                  json={"version": int(current["version"]),
+                                        "system": EVALUATOR_SYSTEM_PROMPT})
         agent_version = int(updated.get("version", int(current["version"]) + 1))
     else:
         try:
@@ -486,7 +491,8 @@ def build_evaluator_message(round_idx: int,
                    "geometry and composition vs the raw frame for the same anchor; medium, "
                    "palette, and line_quality vs the style reference.\n"
                    "Thresholds (driver-enforced): geometry = 5 required; composition = 5 "
-                   "required; medium, palette, line_quality >= 4 required.\n"
+                   "required; medium = 5 required; line_quality = 5 required; "
+                   "palette >= 4 required.\n"
                    "Score only `[NEW]` keyframes; do NOT rescore `[previously approved]` "
                    "ones (coherence context only). Always include "
                    "cross_anchor_coherence_notes.\n"

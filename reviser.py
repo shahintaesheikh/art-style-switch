@@ -103,8 +103,9 @@ FFMPEG_QV = 2
 ANCHOR_IDS = ("A0", "A1", "A2")
 
 # Rubric thresholds (plan §3): hard gates must be 5, soft gates must be ≥4.
-HARD_GATE_MIN = {"geometry": 5, "composition": 5}
-SOFT_GATE_MIN = {"medium": 4, "palette": 4, "line_quality": 4}
+# medium and palette are now hard gates — style must match the reference exactly.
+HARD_GATE_MIN = {"geometry": 5, "composition": 5, "medium": 5, "line_quality": 5}
+SOFT_GATE_MIN = {"palette": 4}
 
 # --------------------------------------------------------------------------
 # Prompts (module-level constants, plan §45; wording tuned at smoke test §17)
@@ -115,8 +116,9 @@ You are the Keyframe Reviser of a two-agent QC gate for style-transfer video \
 pipelines. An Evaluator has scored styled keyframes for 3 fixed anchors (A0, \
 A1, A2) on a 5-dimension rubric: geometry and composition are hard gates \
 (must score 5 — structure and framing must match the raw video frame 1:1); \
-medium, palette and line_quality are soft gates (must score at least 4 — they \
-must match the target art style). One or more anchors FAILED. Your job: \
+medium and line_quality are hard gates (must score exactly 5 — the medium and \
+linework character must match the target art style identically); palette is a \
+soft gate (must score at least 4). One or more anchors FAILED. Your job: \
 produce corrected styled keyframes for the failing anchors ONLY, so the next \
 Evaluator round passes.
 
@@ -692,7 +694,7 @@ def update_reviser_agent(args, agent_id: str, skill_ids: list[str]) -> int:
     current = _request("get_agent", "GET", f"{INFERENCE_BASE_URL}/agents/{agent_id}",
                        headers=_ark_headers(args.ark_api_key))
     resp = _request(
-        "update_agent", "PUT", f"{INFERENCE_BASE_URL}/agents/{agent_id}",
+        "update_agent", "POST", f"{INFERENCE_BASE_URL}/agents/{agent_id}",
         headers=_ark_headers(args.ark_api_key),
         json={
             "version": current["version"],

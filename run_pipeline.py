@@ -4,10 +4,18 @@
 Hosting model: local files are processed locally (ffmpeg / base64); the two
 inputs Seedance needs as references live in the ModelArk Asset Library
 (uploaded once via console) and are referenced by asset:// URIs.
+
+QC gate: qc_gate.py is invoked as a subprocess between raw keyframe extraction
+and Seedance. It runs Seedream round-0 + Evaluator/Reviser loop and writes
+keyframes.json with QC-passed URLs. The pipeline reads those and feeds them
+into Seedance.
 """
 
+import json
 import os
 import shutil
+import subprocess
+import sys
 
 import requests
 from dotenv import load_dotenv
@@ -20,7 +28,6 @@ from pipeline.keyframes import anchor_timestamps, extract_frame
 from pipeline.mux import mux_audio
 from pipeline.probe import probe
 from pipeline.seedance import submit_task, wait_for_task
-from pipeline.seedream import gen_styled_keyframes
 
 WORK = os.environ.get("WORK_DIR", "./work")
 INPUT_VIDEO = os.environ["INPUT_VIDEO"]          # local path (ffmpeg/base64)
@@ -52,13 +59,43 @@ def main() -> None:
     print("audio:", audio)
 
     # 5. anchor keyframes (A1/A2; A0 is the user-provided style ref)
-    raws = [extract_frame(preprocessed, ts, f"{WORK}/kf{i}_raw.jpg")
-            for i, ts in enumerate(anchor_timestamps(info["duration"]), 1)]
+    ts = anchor_timestamps(info["duration"])
+    raws = [extract_frame(preprocessed, t, f"{WORK}/kf{i}_raw.jpg")
+            for i, t in enumerate(ts, 1)]
     print("raw keyframes:", raws)
 
-    # 6. Seedream i2i styled anchors (base64 inline; ModelArk-hosted URLs back)
-    kf_urls = gen_styled_keyframes(raws, STYLE_REF)
-    print("styled keyframe URLs:", kf_urls)
+    # 6. QC Gate: Seedream round-0 → Evaluator → Reviser loop → QC-passed KFs
+    kfs_json = os.path.join(WORK, "qc_keyframes.json")
+    qc_report = os.path.join(WORK, "qc_report.json")
+    anchor_ts = f"0,{ts[0]},{ts[1]}"
+
+    print("=== QC Gate ===")
+    result = subprocess.run(
+        [sys.executable, "qc_gate.py",
+         "--raw-video", preprocessed,
+         "--style-image", STYLE_REF,
+         "--anchor-timestamps", anchor_ts,
+         "--output-kfs-json", kfs_json,
+         "--report-path", qc_report],
+        capture_output=True, text=True, timeout=900,
+    )
+    if result.stdout:
+        # Last line is the compact JSON report (Q29)
+        last_line = result.stdout.strip().split("\n")[-1]
+        print("qc_gate:", last_line[:200], "..." if len(last_line) > 200 else "")
+    if result.returncode != 0:
+        print("qc_gate stderr:", result.stderr, file=sys.stderr)
+        reason = "infra error" if result.returncode == 3 else "QC failed after 3 attempts"
+        raise SystemExit(f"QC gate exit code {result.returncode} — {reason}")
+
+    # Read QC-passed keyframes
+    with open(kfs_json) as f:
+        kf_data = json.load(f)
+
+    # Extract URLs: A1 and A2 are the interior anchors passed to Seedance
+    kf_urls = [kf["image_url"] for kf in kf_data["keyframes"]
+               if kf["anchor_id"] != "A0"]
+    print("QC-passed keyframe URLs:", kf_urls)
 
     # 7. Seedance 2.0 — inputs referenced as asset:// URIs (no hosting needed)
     task_id = submit_task(STYLE_REF_URI, kf_urls, INPUT_VIDEO_URI,

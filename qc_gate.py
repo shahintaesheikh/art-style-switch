@@ -87,8 +87,8 @@ VERSION = "0.1.0"
 INFERENCE_BASE_URL = "https://ark.ap-southeast.bytepluses.com/api/v3"
 
 # Rubric thresholds (plan §3)
-HARD_GATE_MIN = {"geometry": 5, "composition": 5}
-SOFT_GATE_MIN = {"medium": 4, "palette": 4, "line_quality": 4}
+HARD_GATE_MIN = {"geometry": 5, "composition": 5, "medium": 5, "line_quality": 5}
+SOFT_GATE_MIN = {"palette": 4}
 
 # Caps
 MAX_QC_ATTEMPTS = 3
@@ -404,7 +404,7 @@ def main() -> int:
         # ---- Round-0: bootstrap keyframes ---------------------------------
         try:
             keyframes, timestamps, duration = bootstrap_round0(args, tmp)
-        except (InfraError, ReviserInfraError, EvaluatorInfraError) as e:
+        except (ReviserInfraError, EvaluatorInfraError) as e:
             stage = getattr(e, "stage", "round0")
             err = {"stage": stage, "error": str(e)}
             report = build_report("infrastructure_error", args, [], {}, [],
@@ -461,7 +461,7 @@ def main() -> int:
                     eval_anchors, args.style_image, args.style_prompt,
                     history_summary,
                 )
-            except (InfraError, ReviserInfraError, EvaluatorInfraError) as e:
+            except (ReviserInfraError, EvaluatorInfraError) as e:
                 stage = getattr(e, "stage", "evaluator")
                 err = {"stage": stage, "error": str(e)}
                 report = build_report("infrastructure_error", args, timestamps,
@@ -588,7 +588,7 @@ def main() -> int:
 
             try:
                 rev_result = run_reviser_round(rev_args)
-            except (InfraError, ReviserInfraError, EvaluatorInfraError) as e:
+            except (ReviserInfraError, EvaluatorInfraError) as e:
                 stage = getattr(e, "stage", "reviser")
                 err = {"stage": stage, "error": str(e)}
                 report = build_report("infrastructure_error", args, timestamps,
