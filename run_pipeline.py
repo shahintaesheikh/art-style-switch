@@ -54,25 +54,34 @@ def main() -> None:
     preprocessed = f"{WORK}/preprocessed.mp4"
     shutil.copyfile(INPUT_VIDEO, preprocessed)
 
-    # 3. audio extraction
+    # 3. audio extraction (extract before stripping, so reference is silent)
     audio = extract_audio(preprocessed, f"{WORK}/audio.aac")
     print("audio:", audio)
 
-    # 5. anchor keyframes (A0-A4 at 0%, 25%, 50%, 75%, 100%)
+    # 4. strip audio from working video → silent reference for Seedream/Seedance
+    silent_video = f"{WORK}/preprocessed_silent.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-i", preprocessed,
+        "-an", "-c:v", "copy", silent_video,
+    ], check=True, capture_output=True)
+    print("silent video:", silent_video)
+
+    # 5. anchor keyframes (A0-A4 at 0%, 25%, 50%, 75%, 100%) — from SILENT video
     ts = anchor_timestamps(info["duration"])
-    raws = [extract_frame(preprocessed, t, f"{WORK}/kf{i}_raw.jpg")
+    raws = [extract_frame(silent_video, t, f"{WORK}/kf{i}_raw.jpg")
             for i, t in enumerate(ts, 0)]
     print("raw keyframes:", raws)
 
     # 6. QC Gate: Seedream round-0 → Evaluator → Reviser loop → QC-passed KFs
+    #    Uses the SILENT video as input (no audio in the pipeline)
     kfs_json = os.path.join(WORK, "qc_keyframes.json")
     qc_report = os.path.join(WORK, "qc_report.json")
     anchor_ts = ",".join(str(t) for t in ts)
 
-    print("=== QC Gate ===")
+    print("=== QC Gate (silent video) ===")
     result = subprocess.run(
         [sys.executable, "qc_gate.py",
-         "--raw-video", preprocessed,
+         "--raw-video", silent_video,
          "--style-image", STYLE_REF,
          "--anchor-timestamps", anchor_ts,
          "--output-kfs-json", kfs_json,
@@ -80,7 +89,6 @@ def main() -> None:
         capture_output=True, text=True, timeout=1800,
     )
     if result.stdout:
-        # Last line is the compact JSON report (Q29)
         last_line = result.stdout.strip().split("\n")[-1]
         print("qc_gate:", last_line[:200], "..." if len(last_line) > 200 else "")
     if result.returncode != 0:
@@ -97,7 +105,7 @@ def main() -> None:
                if kf["anchor_id"] != "A0"]
     print("QC-passed keyframe URLs:", kf_urls)
 
-    # 7. Seedance 2.0 — 720p (plan §14)
+    # 7. Seedance 2.0 — 720p, silent reference → silent output
     task_id = submit_task(STYLE_REF_URI, kf_urls, INPUT_VIDEO_URI,
                           duration=round(info["duration"]))
     print("Seedance task:", task_id)
@@ -105,7 +113,7 @@ def main() -> None:
     silent = download(stylized_url, f"{WORK}/stylized_silent.mp4")
     print("stylized silent:", silent)
 
-    # 8. audio mux → final deliverable
+    # 8. audio mux → final deliverable (re-mux the pre-extracted audio)
     final = mux_audio(silent, audio, f"{WORK}/unity_handdrawn_final.mp4")
     print("DONE →", final)
     print("final probe:", probe(final))
