@@ -16,12 +16,14 @@ def _headers() -> dict:
 
 
 def submit_task(style_ref_uri: str, kf_urls: list[str], video_uri: str,
-                duration: int = 8, seed: int = 42) -> str:
+                duration: int = 8, seed: int = 42,
+                resolution: str | None = None) -> str:
     """Submit the Seedance task; returns task_id.
 
     style_ref_uri and video_uri are asset:// URIs from the ModelArk Asset
     Library (uploaded once via console). kf_urls are ModelArk-hosted
     Seedream output URLs, passed straight through.
+    resolution: e.g. "720p", "1080p", "4K" (plan §14).
     """
     content = [{"type": "text", "text": SEEDANCE_PROMPT}]
     content.append({"type": "image_url", "image_url": {"url": style_ref_uri},
@@ -31,12 +33,15 @@ def submit_task(style_ref_uri: str, kf_urls: list[str], video_uri: str,
                         "role": "reference_image"})
     content.append({"type": "video_url", "video_url": {"url": video_uri},
                     "role": "reference_video"})
+    body = {"model": SEEDANCE_MODEL, "content": content,
+            "ratio": "3:4", "duration": duration, "seed": seed,
+            "camera_fixed": False, "watermark": False}
+    if resolution:
+        body["resolution"] = resolution
     r = requests.post(
         f"{os.environ['ARK_BASE_URL']}/contents/generations/tasks",
         headers=_headers(),
-        json={"model": SEEDANCE_MODEL, "content": content,
-              "ratio": "3:4", "duration": duration, "seed": seed,
-              "camera_fixed": False, "watermark": False},
+        json=body,
         timeout=60,
     )
     r.raise_for_status()

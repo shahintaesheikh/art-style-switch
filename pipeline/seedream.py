@@ -10,7 +10,7 @@ from .prompts import KEYFRAME_PROMPT
 
 # Plan §2.2's doubao-seedream-5-0-lite-260128 is not enabled on this account;
 # seedream-5-0-260128 is the available i2i-capable Seedream model.
-SEEDREAM_MODEL = "seedream-5-0-260128"
+SEEDREAM_MODEL = "dola-seedream-5-0-pro-260628"
 
 
 def b64_image(path: str) -> str:

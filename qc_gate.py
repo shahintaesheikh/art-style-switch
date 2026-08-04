@@ -103,7 +103,22 @@ ROUND0_SEED_PROMPT = (
     "original frame 1:1. Do not add, remove, move, rotate, resize, or morph "
     "any object. Maintain the same framing, zoom level, and 3:4 aspect ratio "
     "as the original — no letterboxing, no cropping. Match the style "
-    "reference's medium, palette, and line_quality faithfully."
+    "reference's medium, palette, and line_quality faithfully.\n"
+    "Pay special attention to the RED PLAYER CAR: its shape, silhouette, "
+    "and shading must be preserved exactly as in the raw frame. The car roof "
+    "must be clearly distinguishable from the road surface — do not let the "
+    "car body merge with the road or background. The red car must remain a "
+    "solid, recognizable shape with consistent red colored-pencil shading "
+    "that matches the reference's crimson tone exactly. The car's outline, "
+    "wheel wells, windows, and body panels must be distinctly rendered and "
+    "not blend into surrounding elements.\n"
+    "BUILDINGS must be consistently rendered in the hand-drawn pencil "
+    "sketch style of the reference: graphite hatching on building facades, "
+    "colored-pencil squares for windows, and sketchy pencil outlines for "
+    "edges. Do not let buildings become flat, solid color blocks — every "
+    "building surface must show visible pencil stroke texture and hatching "
+    "that matches the reference's drawing style exactly. Building windows "
+    "must be distinct colored-pencil squares, not smudged or blurred."
 )
 
 # Round-0 negative prompt (plan §8)
@@ -182,17 +197,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _compute_anchor_timestamps(duration: float,
                                custom: str | None) -> list[float]:
-    """Compute 3 anchor timestamps (plan Q42).
+    """Compute anchor timestamps (plan Q42).
 
-    Defaults to 0%, 33%, 66% of duration. Custom: 3 comma-separated floats.
+    Defaults to 0%, 25%, 50%, 75%, 100% of duration (5 anchors).
+    Custom: comma-separated floats.
     """
     if custom:
         parts = [float(x.strip()) for x in custom.split(",")]
-        if len(parts) != 3:
+        if len(parts) != len(ANCHOR_IDS):
             raise ValueError(
-                f"--anchor-timestamps must have exactly 3 floats, got {len(parts)}")
+                f"--anchor-timestamps must have exactly {len(ANCHOR_IDS)} floats, "
+                f"got {len(parts)}")
         return parts
-    return [0.0, duration * 0.33, duration * 0.66]
+    return [0.0, duration * 0.25, duration * 0.50, duration * 0.75, duration * 1.0]
 
 
 def _round0_seedream(anchor_id: str, raw_frame: Path, style: Resolved | None,
@@ -235,8 +252,8 @@ def bootstrap_round0(args: argparse.Namespace, tmp: Path,
         ffmpeg_extract_frame(video_path, ts, out, args.ffmpeg_path)
         raw_frames[anchor_id] = out
 
-    # Parallel Seedream i2i (round-0 seeds: A0=42, A1=43, A2=44)
-    seeds = [42, 43, 44]
+    # Parallel Seedream i2i (round-0 seeds: all 42 for consistency)
+    seeds = [42, 42, 42, 42, 42]
     keyframes: dict[str, Any] = {}
     with ThreadPoolExecutor(max_workers=3) as ex:
         fut_map = {}

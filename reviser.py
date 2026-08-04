@@ -77,7 +77,7 @@ MODEL_ID = "dola-seed-2-1-turbo-260628"
 # Plan §8 pins doubao-seedream-5-0-lite-260128, but it is not enabled on this
 # account (same situation pipeline/seedream.py already hit); user approved
 # seedream-5-0-260128, the available i2i-capable Seedream 5.0 model.
-SEEDREAM_MODEL_ID = "seedream-5-0-260128"
+SEEDREAM_MODEL_ID = "dola-seedream-5-0-pro-260628"
 ASPECT_RATIO = "3:4"
 ASPECT_W, ASPECT_H = 3, 4
 # Seedream 5.0 on this account requires ≥ 3,686,400 px and rejects "2K"
@@ -92,7 +92,7 @@ AGENTS_CACHE_PATH = "~/.config/kf-qc/agents.json"
 REVISER_MAX_TURNS = 8
 REVISER_MAX_KF_PER_ANCHOR = 3
 REVISER_MAX_KF_TOTAL = 6
-REVISER_WALL_CLOCK_SEC = 240
+REVISER_WALL_CLOCK_SEC = 600
 POLL_INTERVAL_SEC = 2
 POST_TOOL_WAIT_SEC = 1
 INFRA_RETRY_WAIT_SEC = 5
@@ -100,7 +100,7 @@ INFRA_MAX_RETRIES = 1
 DOWNLOAD_MAX_BYTES = 500 * 1024 * 1024
 ASPECT_TOLERANCE = 0.05
 FFMPEG_QV = 2
-ANCHOR_IDS = ("A0", "A1", "A2")
+ANCHOR_IDS = ("A0", "A1", "A2", "A3", "A4")
 
 # Rubric thresholds (plan §3): hard gates must be 5, soft gates must be ≥4.
 # medium and palette are now hard gates — style must match the reference exactly.
@@ -113,8 +113,8 @@ SOFT_GATE_MIN = {"palette": 4}
 
 REVISER_SYSTEM_PROMPT = """\
 You are the Keyframe Reviser of a two-agent QC gate for style-transfer video \
-pipelines. An Evaluator has scored styled keyframes for 3 fixed anchors (A0, \
-A1, A2) on a 5-dimension rubric: geometry and composition are hard gates \
+pipelines. An Evaluator has scored styled keyframes for 5 fixed anchors (A0, \
+A1, A2, A3, A4) on a 5-dimension rubric: geometry and composition are hard gates \
 (must score 5 — structure and framing must match the raw video frame 1:1); \
 medium and line_quality are hard gates (must score exactly 5 — the medium and \
 linework character must match the target art style identically); palette is a \

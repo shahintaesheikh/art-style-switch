@@ -58,16 +58,16 @@ def main() -> None:
     audio = extract_audio(preprocessed, f"{WORK}/audio.aac")
     print("audio:", audio)
 
-    # 5. anchor keyframes (A1/A2; A0 is the user-provided style ref)
+    # 5. anchor keyframes (A0-A4 at 0%, 25%, 50%, 75%, 100%)
     ts = anchor_timestamps(info["duration"])
     raws = [extract_frame(preprocessed, t, f"{WORK}/kf{i}_raw.jpg")
-            for i, t in enumerate(ts, 1)]
+            for i, t in enumerate(ts, 0)]
     print("raw keyframes:", raws)
 
     # 6. QC Gate: Seedream round-0 → Evaluator → Reviser loop → QC-passed KFs
     kfs_json = os.path.join(WORK, "qc_keyframes.json")
     qc_report = os.path.join(WORK, "qc_report.json")
-    anchor_ts = f"0,{ts[0]},{ts[1]}"
+    anchor_ts = ",".join(str(t) for t in ts)
 
     print("=== QC Gate ===")
     result = subprocess.run(
@@ -77,7 +77,7 @@ def main() -> None:
          "--anchor-timestamps", anchor_ts,
          "--output-kfs-json", kfs_json,
          "--report-path", qc_report],
-        capture_output=True, text=True, timeout=900,
+        capture_output=True, text=True, timeout=1800,
     )
     if result.stdout:
         # Last line is the compact JSON report (Q29)
@@ -92,12 +92,12 @@ def main() -> None:
     with open(kfs_json) as f:
         kf_data = json.load(f)
 
-    # Extract URLs: A1 and A2 are the interior anchors passed to Seedance
+    # Extract URLs: all interior anchors (A1-A4) passed to Seedance
     kf_urls = [kf["image_url"] for kf in kf_data["keyframes"]
                if kf["anchor_id"] != "A0"]
     print("QC-passed keyframe URLs:", kf_urls)
 
-    # 7. Seedance 2.0 — inputs referenced as asset:// URIs (no hosting needed)
+    # 7. Seedance 2.0 — 720p (plan §14)
     task_id = submit_task(STYLE_REF_URI, kf_urls, INPUT_VIDEO_URI,
                           duration=round(info["duration"]))
     print("Seedance task:", task_id)

@@ -49,11 +49,11 @@ MODEL_SPEED = "standard"
 INFERENCE_BASE_URL = "https://ark.ap-southeast.bytepluses.com/api/v3"  # Q35
 AGENTS_CACHE_PATH = "~/.config/kf-qc/agents.json"  # §10
 POLL_INTERVAL_SEC = 2   # Q12/Q41
-POLL_TIMEOUT_SEC = 240  # Q41 (4-minute wall clock per session)
+POLL_TIMEOUT_SEC = 600  # Q41 (10-minute wall clock per session — v7 prompt needs more time)
 INFRA_RETRY_WAIT_SEC = 5  # Q28
 INFRA_MAX_RETRIES = 1     # Q28 (retry once)
 
-ANCHOR_IDS = ("A0", "A1", "A2")  # Q42 (fixed 3 anchors for v1)
+ANCHOR_IDS = ("A0", "A1", "A2", "A3", "A4")  # Q42 (5 anchors: start, 25%, 50%, 75%, end)
 
 # Rubric thresholds (plan §3). Hard gates must be exactly 5; soft gates >= 4.
 # medium and palette are now hard gates — style must match the reference exactly.
@@ -85,8 +85,10 @@ EVALUATOR_SYSTEM_PROMPT = """You are the Keyframe QC Evaluator in a style-transf
 - geometry: object count, positions, orientations, and vanishing point in the styled keyframe match its raw frame 1:1. Any added/removed/moved/rotated/resized/morphed object is a defect.
 - composition: same framing, zoom, and crop as the raw frame; 3:4 aspect; no letterboxing.
 - medium: rendering medium matches the target style EXACTLY (e.g. pencil + colored-pencil, anime cel, oil, photorealism, watercolor). ANY drift to a different medium is a defect — even if the result looks attractive, if the medium is not identical to the reference it must score ≤4. The medium must be perceptually indistinguishable. Cross-anchor medium CONSISTENCY is paramount — the styled keyframes must share one uniform medium across all anchors. A set of keyframes with a consistent medium (even slightly off from the reference) is BETTER than a set where some anchors match exactly and others drift. Penalize any anchor whose medium deviates from the other anchors' medium.
+  Also assess the DEGREE of medium application: stroke weight, pencil pressure, hatching density, how heavily or sparsely the medium is laid down. Two keyframes may both use "colored pencil + graphite" but one applies it with heavy dense strokes while the other uses light sketchy strokes — this is a medium defect. The texture coarseness, stroke weight, and application intensity must be perceptually identical across all anchors and match the reference.
 - palette: color treatment matches the target style (e.g. hatched crimson vs flat red, graphite-on-cream vs saturated color).
 - line_quality: mark/edge character matches the target style EXACTLY (e.g. sketchy graphite for pencil, clean cel lines for anime, painterly edges for oil). ANY deviation in linework character is a defect — the stroke type, edge quality, and mark-making must be perceptually indistinguishable from the reference.
+  Also assess the FINENESS and PRECISION of linework: stroke width, detail richness, how tight or loose the linework is. Coarser, less detailed, or looser lines than the reference indicate a line quality defect — even if the stroke type (graphite) matches. A keyframe with noticeably fewer fine details, thicker lines, or less precise edges than the reference or sibling anchors should score lower on line_quality.
 
 ### Score anchors (apply to every dimension)
 - 5 = matches the reference exactly on this dimension; no detectable deviation.
@@ -100,11 +102,13 @@ Medium and line_quality are also hard gates (minimum 5). A score of 4 on medium 
 
 ## Scoring rules
 - MEDIUM/ART STYLE CONSISTENCY ACROSS ANCHORS IS A HARD REQUIREMENT. The final video interpolates style between these anchors, so any medium switching between anchors produces visible style jumps in the output. A keyframe that uses a different medium than its sibling anchors is a defect on its own medium score even if it individually matches the reference better. Uniformly "pretty close but consistent" beats "sometimes exact, sometimes off" with the video flickering between styles. Flag any cross-anchor medium drift in `cross_anchor_coherence_notes` and factor it into the affected anchor's medium score.
+- DEGREE OF APPLICATION is scored within medium and line_quality. Evaluate not just the TYPE of medium or linework (e.g. "colored pencil + graphite") but the INTENSITY and DEGREE of its application. Compare stroke weight, pencil pressure, hatching density, texture roughness, line precision, shading tightness, and detail level against both the style reference AND sibling anchors. A keyframe with the correct medium type but applied at a markedly different intensity (e.g., much heavier strokes, much looser shading, much coarser lines) should score lower on both medium and line_quality. Cite specific differences in the degree of application in your rationales.
 - Compare geometry and composition ONLY against the raw frame for the same anchor. Compare medium, palette, and line_quality ONLY against the style reference.
 - Score every keyframe tagged `[NEW ...]` on all 5 dimensions. NEVER rescore keyframes tagged `[previously approved ...]` and never include them in the `keyframes` array — use them only as visual context for cross-anchor coherence.
 - Be strict and evidence-based. Rationales must cite concrete visual evidence (e.g. "the left car is rotated ~15° vs the raw frame", "palette is saturated digital color, not graphite-on-cream"), not vibes.
 - `suggested_focus` is a concrete, actionable fix hint for the downstream prompt-engineering Reviser (what to change in the generation prompt/seed/timestamp), only for failing keyframes; use an empty string for passing ones.
-- Every round, also write `cross_anchor_coherence_notes`: whether the scored keyframes are stylistically consistent with each other and with any approved keyframes shown (medium, palette, line_quality drift ACROSS anchors), even when everything passes.
+- Every round, also write `cross_anchor_coherence_notes`: whether the scored keyframes are stylistically consistent with each other and with any approved keyframes shown (medium, palette, line_quality drift ACROSS anchors), even when everything passes. In the coherence notes, explicitly call out any drift in the DEGREE of medium application across anchors (e.g. "A0 has finer, denser pencil strokes while A1 has looser, coarser strokes") — not just whether the medium type is the same.
+- SUBJECT CONSISTENCY — the RED PLAYER CAR is the hero subject and must be consistent across anchors. In each keyframe, verify the red car's SHAPE, SILHOUETTE, and SHADING are the same car as in the raw frame and in the sibling anchors: same body proportions, same roof line, same wheel placement, same windows. A keyframe where the car's roof blends into the road surface, where the car body merges with the background, or where the car's shape/silhouette shifts is a defect. Score the car's subject consistency into the affected anchor's geometry and medium scores, and call out any car-specific drift in `cross_anchor_coherence_notes`.
 - Echo each scored keyframe's `image_url` back exactly as provided.
 
 ## Output
