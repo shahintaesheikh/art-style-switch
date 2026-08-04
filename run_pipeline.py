@@ -106,12 +106,48 @@ def main() -> None:
     print("QC-passed keyframe URLs:", kf_urls)
 
     # 7. Seedance 2.0 — 720p, silent reference → silent output
-    task_id = submit_task(STYLE_REF_URI, kf_urls, INPUT_VIDEO_URI,
-                          duration=round(info["duration"]))
-    print("Seedance task:", task_id)
-    stylized_url = wait_for_task(task_id)
-    silent = download(stylized_url, f"{WORK}/stylized_silent.mp4")
-    print("stylized silent:", silent)
+    #    VLM gate loops: up to 3 attempts (1 initial + 2 retries)
+    from pipeline.vlm_gate import grade_video
+    from pipeline.prompts import SEEDANCE_PROMPT
+
+    max_vlm_attempts = 3
+    vlm_attempt = 1
+    vlm_passed = False
+    vlm_results = []
+    seedance_seed = 42
+
+    while vlm_attempt <= max_vlm_attempts:
+        print(f"\n=== Seedance generation attempt {vlm_attempt}/{max_vlm_attempts} ===")
+        task_id = submit_task(STYLE_REF_URI, kf_urls, INPUT_VIDEO_URI,
+                              duration=round(info["duration"]), seed=seedance_seed)
+        print("Seedance task:", task_id)
+        stylized_url = wait_for_task(task_id)
+        silent = download(stylized_url, f"{WORK}/stylized_silent.mp4")
+        print("stylized silent:", silent)
+
+        # VLM gate
+        print(f"\n=== VLM Gate (attempt {vlm_attempt}) ===")
+        ts = anchor_timestamps(info["duration"])
+        vlm_result = grade_video(os.environ["ARK_API_KEY"], silent, ts,
+                                   SEEDANCE_PROMPT, attempt=vlm_attempt)
+        vlm_results.append(vlm_result)
+        print(f"  pass: {vlm_result['pass']}")
+        print(f"  failures: {vlm_result['failures']}")
+        for dim, s in vlm_result.get('scores', {}).items():
+            print(f"    {dim}: {s['score']} — {s['rationale'][:100]}")
+
+        if vlm_result['pass']:
+            vlm_passed = True
+            print("  ✅ VLM gate passed")
+            break
+
+        vlm_attempt += 1
+        seedance_seed += 10  # change seed for retry
+        if vlm_attempt <= max_vlm_attempts:
+            print(f"  Retrying with seed={seedance_seed}...")
+
+    if not vlm_passed:
+        print(f"\n⚠️  VLM gate failed after {max_vlm_attempts} attempts. Using best result.")
 
     # 8. audio mux → final deliverable (re-mux the pre-extracted audio)
     final = mux_audio(silent, audio, f"{WORK}/unity_handdrawn_final.mp4")
