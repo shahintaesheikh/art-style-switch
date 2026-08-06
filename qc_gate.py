@@ -199,7 +199,7 @@ def _compute_anchor_timestamps(duration: float,
                                custom: str | None) -> list[float]:
     """Compute anchor timestamps (plan Q42).
 
-    Defaults to 0%, 25%, 50%, 75%, 100% of duration (5 anchors).
+    Defaults to 0%, ~14.3%, ~28.6%, ~42.9%, ~57.1%, ~71.4%, ~85.7%, 100% of duration (8 anchors).
     Custom: comma-separated floats.
     """
     if custom:
@@ -253,7 +253,7 @@ def bootstrap_round0(args: argparse.Namespace, tmp: Path,
         raw_frames[anchor_id] = out
 
     # Parallel Seedream i2i (round-0 seeds: all 42 for consistency)
-    seeds = [42, 42, 42, 42, 42]
+    seeds = [42, 42, 42, 42, 42, 42, 42, 42]
     keyframes: dict[str, Any] = {}
     with ThreadPoolExecutor(max_workers=3) as ex:
         fut_map = {}
@@ -437,7 +437,7 @@ def main() -> int:
             write_report(report, args.report_path)
             return 3
 
-        total_kf_generations = 3  # round-0 created 3 KFs
+        total_kf_generations = 8  # round-0 created 8 KFs
         rounds: list[dict] = []
         best_keyframes = dict(keyframes)  # always keep best-so-far
 

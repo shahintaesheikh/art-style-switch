@@ -66,7 +66,7 @@ def main() -> None:
     ], check=True, capture_output=True)
     print("silent video:", silent_video)
 
-    # 5. anchor keyframes (A0-A4 at 0%, 25%, 50%, 75%, 100%) — from SILENT video
+    # 5. anchor keyframes (A0-A7 at 0%, ~14.3%, ~28.6%, ~42.9%, ~57.1%, ~71.4%, ~85.7%, 100%) — from SILENT video
     ts = anchor_timestamps(info["duration"])
     raws = [extract_frame(silent_video, t, f"{WORK}/kf{i}_raw.jpg")
             for i, t in enumerate(ts, 0)]
@@ -100,7 +100,7 @@ def main() -> None:
     with open(kfs_json) as f:
         kf_data = json.load(f)
 
-    # Extract URLs: all interior anchors (A1-A4) passed to Seedance
+    # Extract URLs: all interior anchors (A1-A7) passed to Seedance
     kf_urls = [kf["image_url"] for kf in kf_data["keyframes"]
                if kf["anchor_id"] != "A0"]
     print("QC-passed keyframe URLs:", kf_urls)

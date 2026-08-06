@@ -5,12 +5,13 @@ import subprocess
 
 
 def anchor_timestamps(duration: float) -> list[int]:
-    """5 anchor timestamps at 0%, 25%, 50%, 75%, 100% of duration.
+    """8 anchor timestamps evenly spaced from 0% to 100% of duration.
 
-    For the 8.04 s demo clip: [0, 2, 4, 6, 8].
+    Divides duration into 7 equal segments, producing 8 anchors
+    at 0%, ~14.3%, ~28.6%, ~42.9%, ~57.1%, ~71.4%, ~85.7%, 100%.
     """
-    return [0, math.floor(duration * 0.25), math.floor(duration * 0.50),
-            math.floor(duration * 0.75), math.floor(duration * 1.0)]
+    n = 8
+    return [math.floor(duration * i / (n - 1)) for i in range(n)]
 
 
 def extract_frame(video_path: str, ts: int, out_path: str) -> str:

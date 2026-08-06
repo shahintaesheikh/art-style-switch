@@ -39,9 +39,9 @@ SOFT_GATE_MIN = {"palette": 4}
 ALL_DIMENSIONS = ("geometry", "composition", "medium", "palette",
                   "line_quality", "medium_consistency")
 
-ANCHOR_IDS = ("A0", "A1", "A2", "A3", "A4")
+ANCHOR_IDS = ("A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7")
 
-VLM_GATE_SYSTEM_PROMPT = """You are a video quality gate. You receive frames extracted from a generated video at 5 evenly-spaced timestamps (0%, 25%, 50%, 75%, 100%), plus the text prompt that was used to generate it. Your job: grade the video on 6 dimensions.
+VLM_GATE_SYSTEM_PROMPT = """You are a video quality gate. You receive frames extracted from a generated video at 8 evenly-spaced timestamps (0%, ~14%, ~29%, ~43%, ~57%, ~71%, ~86%, 100%), plus the text prompt that was used to generate it. Your job: grade the video on 6 dimensions.
 
 ## Dimensions (each scored 1-5)
 

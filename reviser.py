@@ -100,7 +100,7 @@ INFRA_MAX_RETRIES = 1
 DOWNLOAD_MAX_BYTES = 500 * 1024 * 1024
 ASPECT_TOLERANCE = 0.05
 FFMPEG_QV = 2
-ANCHOR_IDS = ("A0", "A1", "A2", "A3", "A4")
+ANCHOR_IDS = ("A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7")
 
 # Rubric thresholds (plan §3): hard gates must be 5, soft gates must be ≥4.
 # medium and palette are now hard gates — style must match the reference exactly.
@@ -113,8 +113,8 @@ SOFT_GATE_MIN = {"palette": 4}
 
 REVISER_SYSTEM_PROMPT = """\
 You are the Keyframe Reviser of a two-agent QC gate for style-transfer video \
-pipelines. An Evaluator has scored styled keyframes for 5 fixed anchors (A0, \
-A1, A2, A3, A4) on a 5-dimension rubric: geometry and composition are hard gates \
+pipelines. An Evaluator has scored styled keyframes for 8 fixed anchors (A0, \
+A1, A2, A3, A4, A5, A6, A7) on a 5-dimension rubric: geometry and composition are hard gates \
 (must score 5 — structure and framing must match the raw video frame 1:1); \
 medium and line_quality are hard gates (must score exactly 5 — the medium and \
 linework character must match the target art style identically); palette is a \
@@ -156,7 +156,7 @@ anchor in `regenerated`.
 
 Constraints:
 - Never regenerate or alter approved anchors; use them only as cross-anchor \
-coherence reference (medium/palette/line consistency across A0–A2).
+coherence reference (medium/palette/line consistency across all anchors).
 - Budget per session: at most 8 turns, 3 generate_keyframe calls per anchor, \
 6 generate_keyframe calls total, 4 minutes wall clock. The driver \
 force-closes the session when any cap is hit — diagnose ALL failing anchors \

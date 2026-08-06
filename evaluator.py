@@ -53,7 +53,7 @@ POLL_TIMEOUT_SEC = 600  # Q41 (10-minute wall clock per session — v7 prompt ne
 INFRA_RETRY_WAIT_SEC = 5  # Q28
 INFRA_MAX_RETRIES = 1     # Q28 (retry once)
 
-ANCHOR_IDS = ("A0", "A1", "A2", "A3", "A4")  # Q42 (5 anchors: start, 25%, 50%, 75%, end)
+ANCHOR_IDS = ("A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7")  # Q42 (8 anchors: 0%, ~14.3%, ~28.6%, ~42.9%, ~57.1%, ~71.4%, ~85.7%, 100%)
 
 # Rubric thresholds (plan §3). Hard gates must be exactly 5; soft gates >= 4.
 # medium and palette are now hard gates — style must match the reference exactly.

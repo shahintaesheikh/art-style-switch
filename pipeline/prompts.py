@@ -33,7 +33,8 @@ SEEDANCE_PROMPT = """\
 
 【Style consistency anchors】
 - @Image 1 (frame 0 — handDrawnStyle reference) anchors the opening style.
-- @Image 2 (frame at ~33% anchor) and @Image 3 (frame at ~66% anchor) anchor the mid-clip style as new cars enter and the perspective deepens.
+- @Image 4 (frame at ~29% anchor) and @Image 6 (frame at ~57% anchor) anchor the mid-clip style as new cars enter and the perspective deepens.
+- @Image 8 (frame at 100% anchor) anchors the closing style.
 Interpolate the style smoothly between these anchors; style, stroke weight, paper color, and palette must remain perceptually identical from the first frame to the last — no drift toward 3D, photorealism, or a different art style at any point.
 
 【Content preservation — strict】
