@@ -25,6 +25,7 @@ load_dotenv()
 import pipeline  # noqa: F401 — truststore injection (corporate TLS interception)
 from pipeline.audio import extract_audio
 from pipeline.keyframes import anchor_timestamps, extract_frame
+from pipeline.llm_gate import generate_style_prompts
 from pipeline.mux import mux_audio
 from pipeline.probe import probe
 from pipeline.seedance import submit_task, wait_for_task
@@ -51,6 +52,19 @@ def main() -> None:
     # 1-2. probe + preprocess (no-op copy: 560x752 is native 3:4@480p, plan §6)
     info = probe(INPUT_VIDEO)
     print("probe:", info)
+
+    # 2a. LLM Gate — analyze reference style image and generate style-specific prompts
+    #     Uses the ModelArk asset:// URI (not the local path) — see assets-api.md
+    print("\n=== LLM Gate: analyzing reference style image ===")
+    api_key = os.environ["ARK_API_KEY"]
+    style_prompts = generate_style_prompts(api_key, STYLE_REF_URI)
+    print("  style_label:", style_prompts["style_analysis"].get("style_label", "unknown"))
+    print("  medium:", style_prompts["style_analysis"].get("medium", "")[:80])
+    print("  keyframe prompt:", len(style_prompts["keyframe"]), "chars")
+    print("  seedance prompt:", len(style_prompts["seedance"]), "chars")
+    KEYFRAME_PROMPT = style_prompts["keyframe"]
+    SEEDANCE_PROMPT = style_prompts["seedance"]
+
     preprocessed = f"{WORK}/preprocessed.mp4"
     shutil.copyfile(INPUT_VIDEO, preprocessed)
 
@@ -83,6 +97,7 @@ def main() -> None:
         [sys.executable, "qc_gate.py",
          "--raw-video", silent_video,
          "--style-image", STYLE_REF,
+         "--style-prompt", KEYFRAME_PROMPT,
          "--anchor-timestamps", anchor_ts,
          "--output-kfs-json", kfs_json,
          "--report-path", qc_report],
@@ -108,7 +123,6 @@ def main() -> None:
     # 7. Seedance 2.0 — 720p, silent reference → silent output
     #    VLM gate loops: up to 3 attempts (1 initial + 2 retries)
     from pipeline.vlm_gate import grade_video
-    from pipeline.prompts import SEEDANCE_PROMPT
 
     max_vlm_attempts = 3
     vlm_attempt = 1
@@ -119,7 +133,8 @@ def main() -> None:
     while vlm_attempt <= max_vlm_attempts:
         print(f"\n=== Seedance generation attempt {vlm_attempt}/{max_vlm_attempts} ===")
         task_id = submit_task(STYLE_REF_URI, kf_urls, INPUT_VIDEO_URI,
-                              duration=round(info["duration"]), seed=seedance_seed)
+                              duration=round(info["duration"]), seed=seedance_seed,
+                              prompt=SEEDANCE_PROMPT)
         print("Seedance task:", task_id)
         stylized_url = wait_for_task(task_id)
         silent = download(stylized_url, f"{WORK}/stylized_silent.mp4")

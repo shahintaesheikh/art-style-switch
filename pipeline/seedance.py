@@ -17,15 +17,18 @@ def _headers() -> dict:
 
 def submit_task(style_ref_uri: str, kf_urls: list[str], video_uri: str,
                 duration: int = 8, seed: int = 42,
-                resolution: str | None = None) -> str:
+                resolution: str | None = None,
+                prompt: str | None = None) -> str:
     """Submit the Seedance task; returns task_id.
 
     style_ref_uri and video_uri are asset:// URIs from the ModelArk Asset
     Library (uploaded once via console). kf_urls are ModelArk-hosted
     Seedream output URLs, passed straight through.
     resolution: e.g. "720p", "1080p", "4K" (plan §14).
+    prompt: optional override for SEEDANCE_PROMPT (e.g. from LLM gate).
     """
-    content = [{"type": "text", "text": SEEDANCE_PROMPT}]
+    prompt_text = prompt if prompt is not None else SEEDANCE_PROMPT
+    content = [{"type": "text", "text": prompt_text}]
     content.append({"type": "image_url", "image_url": {"url": style_ref_uri},
                     "role": "reference_image"})
     for u in kf_urls:
