@@ -54,10 +54,10 @@ def main() -> None:
     print("probe:", info)
 
     # 2a. LLM Gate — analyze reference style image and generate style-specific prompts
-    #     Uses the ModelArk asset:// URI (not the local path) — see assets-api.md
+    #     The VLM receives the image as base64 inline (no asset upload needed)
     print("\n=== LLM Gate: analyzing reference style image ===")
     api_key = os.environ["ARK_API_KEY"]
-    style_prompts = generate_style_prompts(api_key, STYLE_REF_URI)
+    style_prompts = generate_style_prompts(api_key, STYLE_REF)
     print("  style_label:", style_prompts["style_analysis"].get("style_label", "unknown"))
     print("  medium:", style_prompts["style_analysis"].get("medium", "")[:80])
     print("  keyframe prompt:", len(style_prompts["keyframe"]), "chars")

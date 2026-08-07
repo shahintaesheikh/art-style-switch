@@ -7,13 +7,13 @@ It replaces the hardcoded prompts in prompts.py with dynamically generated ones
 that describe the exact medium, line work, color treatment, and texture of the
 user-provided style reference image.
 
-The style reference is referenced via the ModelArk Private Asset Library
-(asset://<id> URI) — the asset is uploaded once in the ModelArk dashboard and
-referenced by URI, not sent as base64. See .pi/skills/assets-api.md.
+The reference image is sent as base64 inline (the VLM chat completions API
+accepts data URIs — same as vlm_gate.py uses for keyframe grading). No asset
+upload or public URL is needed for this step.
 
 Usage:
     from pipeline.llm_gate import generate_style_prompts
-    prompts = generate_style_prompts(ARK_API_KEY, "asset://asset-...")
+    prompts = generate_style_prompts(ARK_API_KEY, style_ref_path)
     # prompts["keyframe"]  → str (KEYFRAME_PROMPT)
     # prompts["seedance"]  → str (SEEDANCE_PROMPT)
     # prompts["style_analysis"]  → dict (raw VLM analysis, for debugging)
@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 
@@ -139,28 +140,23 @@ def _headers(api_key: str) -> dict:
             "Content-Type": "application/json"}
 
 
-def _validate_asset_uri(uri: str) -> None:
-    """Reject local file paths — the LLM gate requires a ModelArk asset:// URI."""
-    if uri.startswith("asset://"):
-        return  # OK — ModelArk Private Asset Library reference
-    if uri.startswith("https://") or uri.startswith("http://"):
-        return  # OK — https URL works as a fallback
-    # Looks like a local path — the user's request is to use the assets API
-    raise ValueError(
-        f"LLM gate requires an asset:// URI (or https URL), not a local path: {uri!r}.\n"
-        f"Upload the style reference image to the ModelArk Asset Library (console) and\n"
-        f"set STYLE_REF_URI=asset://<id> in your .env file. See .pi/skills/assets-api.md."
-    )
+def b64_data_uri(path: str) -> str:
+    """Return a base64 data URI for the given image file."""
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    return f"data:image/jpeg;base64,{b64}"
 
 
 # ---------------------------------------------------------------------------
 # VLM call
 # ---------------------------------------------------------------------------
 
-def _call_vlm_analyze(api_key: str, style_ref_uri: str,
+def _call_vlm_analyze(api_key: str, image_path: str,
                       timeout: int = 120) -> dict:
-    """Send the reference image (via ModelArk asset:// URI) to the VLM
+    """Send the reference image (base64 data URI) to the VLM
     and return the parsed style analysis JSON."""
+    image_data = b64_data_uri(image_path)
+
     r = requests.post(
         f"{INFERENCE_BASE_URL}/chat/completions",
         headers=_headers(api_key),
@@ -172,7 +168,7 @@ def _call_vlm_analyze(api_key: str, style_ref_uri: str,
                     "role": "user",
                     "content": [
                         {"type": "text", "text": "Analyze the style of this reference image in detail."},
-                        {"type": "image_url", "image_url": {"url": style_ref_uri}},
+                        {"type": "image_url", "image_url": {"url": image_data}},
                     ],
                 },
             ],
@@ -199,15 +195,14 @@ def _call_vlm_analyze(api_key: str, style_ref_uri: str,
 # Public API
 # ---------------------------------------------------------------------------
 
-def generate_style_prompts(api_key: str, style_ref_uri: str,
+def generate_style_prompts(api_key: str, style_ref_path: str,
                            timeout: int = 120) -> dict[str, str]:
-    """Analyze the reference style image (via ModelArk asset:// URI) and
+    """Analyze the reference style image (local path, sent as base64) and
     generate style-specific prompts.
 
     Args:
         api_key: BytePlus ModelArk API key (Bearer).
-        style_ref_uri: ModelArk asset:// URI for the reference style image,
-                       e.g. "asset://asset-20260222234430-mxpgh".
+        style_ref_path: Local path to the reference style image (JPEG).
         timeout: Timeout in seconds for the VLM call.
 
     Returns:
@@ -217,13 +212,11 @@ def generate_style_prompts(api_key: str, style_ref_uri: str,
             "style_analysis": dict — the raw analysis from the VLM (for debugging)
 
     Raises:
-        ValueError: if style_ref_uri is a local file path.
         requests.RequestException: on HTTP/network failures.
         json.JSONDecodeError: if the VLM response is not valid JSON.
         KeyError: if the response is missing required fields.
     """
-    _validate_asset_uri(style_ref_uri)
-    analysis = _call_vlm_analyze(api_key, style_ref_uri, timeout=timeout)
+    analysis = _call_vlm_analyze(api_key, style_ref_path, timeout=timeout)
 
     # Fill in the prompt templates
     keyframe_prompt = KEYFRAME_PROMPT_TEMPLATE.format(
