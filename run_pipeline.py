@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Unity hand-drawn style pipeline — end-to-end runner (plan §15).
+"""Art-style-switch pipeline — end-to-end runner (plan §15).
 
-Hosting model: local files are processed locally (ffmpeg / base64); the two
-inputs Seedance needs as references live in the ModelArk Asset Library
-(uploaded once via console) and are referenced by asset:// URIs.
+Hosting model: local files are processed locally (ffmpeg / base64). The style
+reference image is passed everywhere as a base64 data URI (VLM analysis,
+Seedream i2i, and Seedance reference_image — Seedance 2.0 supports base64
+image input per docs §Limitations/Multimodal input). Only the input video
+reference for Seedance still needs an asset:// URI (video input is URL/asset
+only, base64 not supported for video).
 
 QC gate: qc_gate.py is invoked as a subprocess between raw keyframe extraction
 and Seedance. It runs Seedream round-0 + Evaluator/Reviser loop and writes
@@ -34,7 +37,6 @@ WORK = os.environ.get("WORK_DIR", "./work")
 INPUT_VIDEO = os.environ["INPUT_VIDEO"]          # local path (ffmpeg/base64)
 STYLE_REF = os.environ["STYLE_REF"]              # local path (base64)
 INPUT_VIDEO_URI = os.environ["INPUT_VIDEO_URI"]  # asset://... (Seedance reference)
-STYLE_REF_URI = os.environ["STYLE_REF_URI"]      # asset://... (Seedance reference)
 
 
 def download(url: str, out: str) -> str:
@@ -132,7 +134,7 @@ def main() -> None:
 
     while vlm_attempt <= max_vlm_attempts:
         print(f"\n=== Seedance generation attempt {vlm_attempt}/{max_vlm_attempts} ===")
-        task_id = submit_task(STYLE_REF_URI, kf_urls, INPUT_VIDEO_URI,
+        task_id = submit_task(STYLE_REF, kf_urls, INPUT_VIDEO_URI,
                               duration=round(info["duration"]), seed=seedance_seed,
                               prompt=SEEDANCE_PROMPT)
         print("Seedance task:", task_id)

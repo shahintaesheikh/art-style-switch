@@ -1,5 +1,6 @@
 """Module 7 — stylized video generation via Seedance 2.0 (plan §11)."""
 
+import base64
 import os
 import time
 
@@ -15,21 +16,30 @@ def _headers() -> dict:
             "Content-Type": "application/json"}
 
 
-def submit_task(style_ref_uri: str, kf_urls: list[str], video_uri: str,
+def _b64_data_uri(path: str) -> str:
+    """Read a local image file and return a base64 data URI."""
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    return f"data:image/jpeg;base64,{b64}"
+
+
+def submit_task(style_ref_path: str, kf_urls: list[str], video_uri: str,
                 duration: int = 8, seed: int = 42,
                 resolution: str | None = None,
                 prompt: str | None = None) -> str:
     """Submit the Seedance task; returns task_id.
 
-    style_ref_uri and video_uri are asset:// URIs from the ModelArk Asset
-    Library (uploaded once via console). kf_urls are ModelArk-hosted
-    Seedream output URLs, passed straight through.
+    style_ref_path: Local path to the reference style image (JPEG).
+                     Sent as a base64 data URI — no asset upload needed.
+    kf_urls: ModelArk-hosted Seedream output URLs (QC-passed keyframes).
+    video_uri: asset:// URI or https URL for the reference video.
     resolution: e.g. "720p", "1080p", "4K" (plan §14).
     prompt: optional override for SEEDANCE_PROMPT (e.g. from LLM gate).
     """
     prompt_text = prompt if prompt is not None else SEEDANCE_PROMPT
+    style_b64 = _b64_data_uri(style_ref_path)
     content = [{"type": "text", "text": prompt_text}]
-    content.append({"type": "image_url", "image_url": {"url": style_ref_uri},
+    content.append({"type": "image_url", "image_url": {"url": style_b64},
                     "role": "reference_image"})
     for u in kf_urls:
         content.append({"type": "image_url", "image_url": {"url": u},
