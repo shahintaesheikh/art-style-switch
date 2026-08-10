@@ -554,6 +554,85 @@ def seedream_i2i(raw_frame: Path, style: Resolved | None, prompt: str,
 
 
 # --------------------------------------------------------------------------
+# LLM-generated prompt observability (before the prompt is sent to the image
+# generation model — Seedream i2i). Only prompts produced by the Reviser LLM
+# (the generate_keyframe tool) are logged here; driver/static prompts are not.
+# --------------------------------------------------------------------------
+
+# Default directory for LLM-generated prompt logs (.txt files). Configurable
+# via the PROMPT_LOG_DIR env var; relative to the current working directory.
+DEFAULT_PROMPT_LOG_DIR = os.environ.get("PROMPT_LOG_DIR", os.path.join("work", "prompts_log"))
+
+
+def _prompt_log_dir() -> Path:
+    """Resolve + create the prompt-log directory, relative to CWD."""
+    d = Path(DEFAULT_PROMPT_LOG_DIR).expanduser()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def log_llm_prompt(anchor: str, timestamp_sec: float, prompt: str,
+                   negative_prompt: str, seed: int, session_id: str) -> Path:
+    """Persist one LLM-generated Seedream prompt to a .txt file, before it is
+    passed to the image generation model.
+
+    Returns the path of the written log file.
+
+    The Reviser Managed Agent (dola-seed-2-1-turbo) engineers the `prompt` and
+    `negative_prompt` for each failing anchor interactively; this captures them
+    for observability. The filename is unique per generation so every prompt
+    produced by the LLM is preserved.
+    """
+    log_dir = _prompt_log_dir()
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    safe_anchor = anchor.replace("/", "_").strip() or "anchor"
+    fname = f"prompt_{safe_anchor}_{stamp}.txt"
+    path = log_dir / fname
+
+    lines = [
+        f"# LLM-generated Seedream image-generation prompt — {path.name}",
+        f"logged_at: {datetime.datetime.now().isoformat(timespec='seconds')}",
+        f"source: Reviser Managed Agent (generate_keyframe tool)",
+        f"session_id: {session_id}",
+        f"anchor_id: {anchor}",
+        f"timestamp_sec: {timestamp_sec}",
+        f"seed: {seed}",
+        "",
+        "## prompt",
+        prompt,
+        "",
+        "## negative_prompt",
+        negative_prompt if negative_prompt else "(none)",
+        "",
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+# Also log a running index of every LLM-generated prompt in one file for a
+# quick overview of the whole QC run.
+def log_llm_prompt_index(session_id: str, anchor: str, timestamp_sec: float,
+                         prompt: str, negative_prompt: str, seed: int,
+                         entry_path: Path) -> None:
+    """Append one entry to the session's aggregate index .txt file."""
+    log_dir = _prompt_log_dir()
+    index_path = log_dir / f"all_llm_prompts_{session_id}.txt"
+    with index_path.open("a", encoding="utf-8") as f:
+        f.write("\n".join([
+            f"--- {entry_path.name} ---",
+            f"logged_at: {datetime.datetime.now().isoformat(timespec='seconds')}",
+            f"anchor_id: {anchor}",
+            f"timestamp_sec: {timestamp_sec}",
+            f"seed: {seed}",
+            "## prompt",
+            prompt,
+            "## negative_prompt",
+            negative_prompt if negative_prompt else "(none)",
+            "",
+        ]))
+
+
+# --------------------------------------------------------------------------
 # Agent bootstrap (plan §10 — reviser keys only, merged into shared cache)
 # --------------------------------------------------------------------------
 
@@ -973,6 +1052,7 @@ class ReviserState:
         self.kf_calls_total = 0
         self.generated_urls: dict[str, dict] = {}  # url → generation record
         self.actions: list[dict] = []  # audit log (§9 reviser_actions shape)
+        self.session_id: str = ""  # set after session creation, before message send
 
 
 def execute_extract_keyframe(state: ReviserState, inp: dict) -> tuple[list, bool]:
@@ -1004,6 +1084,14 @@ def execute_generate_keyframe(state: ReviserState, inp: dict) -> tuple[list, boo
     if seed is None or force_new:
         seed = random.randint(0, 2**31 - 1)
     raw = state.raw_frames[anchor]
+
+    # --- Observability: log the LLM-generated prompt before it reaches
+    #     the image generation model (Seedream i2i).
+    log_path = log_llm_prompt(anchor, ts, prompt, negative, seed,
+                              state.session_id)
+    log_llm_prompt_index(state.session_id, anchor, ts, prompt, negative,
+                         seed, log_path)
+
     result = seedream_i2i(raw, state.style, prompt, negative, seed,
                           state.args.ark_api_key)
     state.seeds[anchor] = result["seed"]
@@ -1112,6 +1200,7 @@ def run_reviser_round(args) -> dict:
         # --- bootstrap + session -------------------------------------------
         agent_id, env_id = bootstrap_reviser(args)
         session_id = create_session(args, agent_id, env_id)
+        state.session_id = session_id
         blocks = build_reviser_message(style, args.style_prompt, state.raw_frames,
                                        state.timestamps, keyframes, failing,
                                        approved, feedback, coherence_notes,
