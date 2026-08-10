@@ -22,8 +22,10 @@ Usage:
 from __future__ import annotations
 
 import base64
+import datetime
 import json
 import os
+from pathlib import Path
 
 import requests
 
@@ -192,6 +194,79 @@ def _call_vlm_analyze(api_key: str, image_path: str,
 
 
 # ---------------------------------------------------------------------------
+# LLM-generated prompt observability (before the prompts are handed to the
+# image/video generation models — Seedream i2i / Seedance). Only prompts
+# produced by the LLM (the style-analysis VLM + the filled templates) are
+# logged here; static/driver prompts are not.
+# ---------------------------------------------------------------------------
+
+# Default directory for LLM-generated prompt logs (.txt files). Configurable
+# via the PROMPT_LOG_DIR env var; relative to the current working directory.
+DEFAULT_PROMPT_LOG_DIR = os.environ.get("PROMPT_LOG_DIR",
+                                        os.path.join("work", "prompts_log"))
+
+
+def _prompt_log_dir() -> Path:
+    """Resolve + create the prompt-log directory, relative to CWD."""
+    d = Path(DEFAULT_PROMPT_LOG_DIR).expanduser()
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def log_llm_prompts(style_ref_path: str, analysis: dict,
+                    keyframe_prompt: str, seedance_prompt: str) -> Path:
+    """Persist the LLM-generated style analysis + derived prompts to a .txt
+    file, before they are passed to the image generation models.
+
+    Returns the path of the written log file.
+
+    The LLM Gate (dola-seed-2-1-turbo VLM) analyzes the reference style image
+    and the driver fills the KEYFRAME_PROMPT / SEEDANCE_PROMPT templates with
+    that analysis; all three are captured here for observability. The filename
+    is unique per generation so every prompt produced by the LLM is preserved.
+    """
+    log_dir = _prompt_log_dir()
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    fname = f"prompt_llm_gate_{stamp}.txt"
+    path = log_dir / fname
+
+    lines = [
+        f"# LLM-generated style prompts — {path.name}",
+        f"logged_at: {datetime.datetime.now().isoformat(timespec='seconds')}",
+        f"source: LLM Gate (style-analysis VLM {VLM_MODEL} + template fill)",
+        f"style_ref: {style_ref_path}",
+        "",
+        "## style_analysis (raw VLM output)",
+        json.dumps(analysis, indent=2, ensure_ascii=False),
+        "",
+        "## keyframe_prompt (Seedream i2i)",
+        keyframe_prompt,
+        "",
+        "## seedance_prompt (Seedance video)",
+        seedance_prompt,
+        "",
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # Append one entry to the aggregate index .txt file for a quick overview.
+    index_path = log_dir / "all_llm_prompts_llm_gate.txt"
+    with index_path.open("a", encoding="utf-8") as f:
+        f.write("\n".join([
+            f"--- {path.name} ---",
+            f"logged_at: {datetime.datetime.now().isoformat(timespec='seconds')}",
+            f"style_ref: {style_ref_path}",
+            f"style_label: {analysis.get('style_label', '(unknown)')}",
+            "## keyframe_prompt",
+            keyframe_prompt,
+            "## seedance_prompt",
+            seedance_prompt,
+            "",
+        ]))
+
+    return path
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -236,6 +311,10 @@ def generate_style_prompts(api_key: str, style_ref_path: str,
         shading_technique=analysis.get("shading_technique", ""),
         texture=analysis.get("texture", ""),
     )
+
+    # --- Observability: log the LLM-generated prompts before they are
+    #     passed to the image/video generation models (Seedream / Seedance).
+    log_llm_prompts(style_ref_path, analysis, keyframe_prompt, seedance_prompt)
 
     return {
         "keyframe": keyframe_prompt,
