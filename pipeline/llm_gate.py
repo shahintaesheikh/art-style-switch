@@ -50,7 +50,7 @@ INFERENCE_BASE_URL = "https://ark.ap-southeast.bytepluses.com/api/v3"
 STYLE_ANALYSIS_SYSTEM_PROMPT = """\
 You are a professional art director and prompt engineer. You will receive a single reference image — a style guide for a video-style-transfer pipeline.
 
-Your job: analyze the image's visual medium, rendering technique, line work, color treatment, shading, and texture in meticulous detail, then output a structured JSON description.
+Your job: analyze the image's visual medium, rendering technique, line work, color, shading, and texture in meticulous detail, then output a structured JSON description.
 
 ## Analysis dimensions (be specific — avoid vague terms like "artistic" or "stylized")
 
@@ -58,7 +58,7 @@ Your job: analyze the image's visual medium, rendering technique, line work, col
 
 2. **line_work**: Describe the line quality in detail. (e.g., "fine graphite hatching and cross-hatching; sketchy, slightly irregular outlines as if drawn by hand with a soft 2B pencil; no clean vector lines", "bold black ink outlines, uniform width, with minimal internal detail — cartoon/comic style", "delicate, thin pen lines with tight parallel hatching for shading; very precise and controlled", "wide charcoal strokes with smudged edges; no sharp outlines; soft and atmospheric", "no visible outlines; forms defined by color patches and value contrast — painterly approach", "scratchy, jagged lines with variable width; energetic and loose", "stippled dots building up value — no lines at all except for edges")
 
-3. **color_palette**: Describe the color treatment. (e.g., "crimson red colored-pencil, ultramarine blue, light cerulean sky wash, graphite greys, cream/off-white paper showing through; hatched, not flat fill", "muted earth tones — burnt sienna, raw umber, olive green, warm ochre, cream highlights; low saturation, warm palette", "high-saturation primaries — bright cyan, magenta, yellow, with black keylines; flat cel-shaded areas, no gradients", "monochromatic sepia — warm brown ink on cream paper; values from pale tan to dark umber, no other hues", "cool palette — cerulean, viridian, payne's grey, titanium white; thin washes over visible pencil underdrawing", "vibrant gouache — saturated cadmium red, cobalt blue, permanent green, yellow ochre; opaque flat areas with visible brush strokes")
+3. **color_palette**: Describe the color treatment. (e.g., "crimson red colored-pencil, completely monochromatic, ultramarine blue, light cerulean sky wash, graphite greys, cream/off-white paper showing through; hatched, not flat fill", "muted earth tones — burnt sienna, raw umber, olive green, warm ochre, cream highlights; low saturation, warm palette", "high-saturation primaries — bright cyan, magenta, yellow, with black keylines; flat cel-shaded areas, no gradients", "monochromatic sepia — warm brown ink on cream paper; values from pale tan to dark umber, no other hues", "cool palette — cerulean, viridian, payne's grey, titanium white; thin washes over visible pencil underdrawing", "vibrant gouache — saturated cadmium red, cobalt blue, permanent green, yellow ochre; opaque flat areas with visible brush strokes")
 
 4. **shading_technique**: How are shadows and volume created? (e.g., "pencil stroke density — lighter areas have wide hatch spacing, shadows have dense cross-hatching; no smooth gradients", "watercolor washes — wet-on-wet for soft shadows, dry brush for texture; transparent layers building up value", "flat cel-shading — two-tone: a base color and a darker shadow shape with a hard edge; no gradient between them", "charcoal smudging — value built by rubbing/pressing, not by distinct strokes; very smooth transitions", "stippling — dots of varying density; no lines, no smudging, no hatching", "hatching with fine-liner — parallel lines in one direction, cross-hatching for deeper shadows; consistent line spacing", "oil-paint impasto — thick visible brush strokes, directional stroke patterns following form; shadow is darker paint, not transparency")
 
@@ -99,7 +99,7 @@ Content preservation (must match the raw source frame exactly — do not invent,
 - Preserve camera perspective, focal length, and road vanishing point exactly.
 - Preserve the position, scale, orientation, and count of every object.
 - Preserve the composition and framing 1:1; do not zoom, crop, rotate, or letterbox.
-- Preserve the approximate colors of the source, only reinterpreted through the {style_label}.
+- Preserve the colors of the source, only interpreted through the {style_label}.
 
 Forbidden: photorealism, 3D renders, smooth gradients, airbrushed look, anime cel shading, cartoon outlines with flat fills, watercolor blobs without pencil lines, photography, AI-overprocessed smooth textures, extra lens flare, extra motion blur not in the source, any signature, watermark, or text.
 

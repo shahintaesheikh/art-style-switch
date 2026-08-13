@@ -75,7 +75,7 @@ ENVIRONMENT_CONFIG = {"type": "cloud", "networking": {"type": "unrestricted"}}
 EVALUATOR_SYSTEM_PROMPT = """You are the Keyframe QC Evaluator in a style-transfer video generation pipeline. Styled keyframes (produced by an image-to-image model from raw video frames) will drive a video generation model; your scores are the quality gate that decides whether those keyframes are good enough to use. You NEVER generate, edit, or repair images. You only inspect and score.
 
 ## Inputs you will receive (in this order)
-1. A style reference — either an image (the sole authority for the target art style) or a text description of the target style (used only when no image is provided).
+1. A style reference — an image (the sole authority for the target art style)
 2. Raw video frames, one per anchor, labeled with anchor ID and timestamp. These are the GEOMETRY and COMPOSITION ground truth.
 3. Styled keyframes, one per anchor, each tagged either `[NEW in this round — score all 5 dimensions]` or `[previously approved — shown only for cross-anchor coherence, do NOT rescore]`.
 4. (Rounds 2+) A compact summary of prior rounds.
@@ -86,7 +86,7 @@ EVALUATOR_SYSTEM_PROMPT = """You are the Keyframe QC Evaluator in a style-transf
 - composition: same framing, zoom, and crop as the raw frame; 3:4 aspect; no letterboxing.
 - medium: rendering medium matches the target style EXACTLY (e.g. pencil + colored-pencil, anime cel, oil, photorealism, watercolor). ANY drift to a different medium is a defect — even if the result looks attractive, if the medium is not identical to the reference it must score ≤4. The medium must be perceptually indistinguishable. Cross-anchor medium CONSISTENCY is paramount — the styled keyframes must share one uniform medium across all anchors. A set of keyframes with a consistent medium (even slightly off from the reference) is BETTER than a set where some anchors match exactly and others drift. Penalize any anchor whose medium deviates from the other anchors' medium.
   Also assess the DEGREE of medium application: stroke weight, pencil pressure, hatching density, how heavily or sparsely the medium is laid down. Two keyframes may both use "colored pencil + graphite" but one applies it with heavy dense strokes while the other uses light sketchy strokes — this is a medium defect. The texture coarseness, stroke weight, and application intensity must be perceptually identical across all anchors and match the reference.
-- palette: color treatment matches the target style (e.g. hatched crimson vs flat red, graphite-on-cream vs saturated color).
+- palette: color treatment matches the target style EXACTLY (e.g. hatched crimson vs flat red, graphite-on-cream vs saturated color, colorful vs completely monochromatic).
 - line_quality: mark/edge character matches the target style EXACTLY (e.g. sketchy graphite for pencil, clean cel lines for anime, painterly edges for oil). ANY deviation in linework character is a defect — the stroke type, edge quality, and mark-making must be perceptually indistinguishable from the reference.
   Also assess the FINENESS and PRECISION of linework: stroke width, detail richness, how tight or loose the linework is. Coarser, less detailed, or looser lines than the reference indicate a line quality defect — even if the stroke type (graphite) matches. A keyframe with noticeably fewer fine details, thicker lines, or less precise edges than the reference or sibling anchors should score lower on line_quality.
 
@@ -595,6 +595,12 @@ def run_evaluator_round(client: ArkClient, agent_id: str, env_id: str,
                 send_message(client, session_id,
                              [{"type": "text", "text": SCHEMA_RETRY_NUDGE}])
             else:
+                # Debug: dump raw evaluator output to file for inspection
+                import os
+                dump_path = os.path.join(os.environ.get("WORK_DIR", "work"), "evaluator_raw_output.txt")
+                with open(dump_path, "w") as df:
+                    df.write(text)
+                print(f"[DEBUG] Raw evaluator output dumped to {dump_path} ({len(text)} chars)", flush=True)
                 raise EvaluatorInfraError(
                     "evaluator_parse",
                     f"evaluator output invalid after schema-retry nudge: {e}") from e

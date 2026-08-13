@@ -215,9 +215,15 @@ def _compute_anchor_timestamps(duration: float,
 def _round0_seedream(anchor_id: str, raw_frame: Path, style: Resolved | None,
                      style_prompt: str | None, seed: int,
                      api_key: str, ffmpeg: str) -> dict:
-    """One round-0 Seedream i2i call. Returns {url, seed, prompt_used, ...}."""
+    """One round-0 Seedream i2i call. Returns {url, seed, prompt_used, ...}.
+
+    Uses the dynamic ``style_prompt`` from the LLM Gate when provided;
+    falls back to the hardcoded ``ROUND0_SEED_PROMPT`` only if no
+    style_prompt is given (legacy behavior).
+    """
+    prompt = style_prompt if style_prompt else ROUND0_SEED_PROMPT
     return seedream_i2i(
-        raw_frame, style, ROUND0_SEED_PROMPT, ROUND0_NEGATIVE_PROMPT,
+        raw_frame, style, prompt, ROUND0_NEGATIVE_PROMPT,
         seed, api_key,
     )
 

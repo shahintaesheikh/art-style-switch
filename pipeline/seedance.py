@@ -8,7 +8,7 @@ import requests
 
 from .prompts import SEEDANCE_PROMPT
 
-SEEDANCE_MODEL = "dreamina-seedance-2-0-260128"
+SEEDANCE_MODEL = "dreamina-seedance-2-5-260628"
 
 
 def _headers() -> dict:
@@ -46,8 +46,12 @@ def submit_task(style_ref_path: str, kf_urls: list[str], video_uri: str,
                         "role": "reference_image"})
     content.append({"type": "video_url", "video_url": {"url": video_uri},
                     "role": "reference_video"})
+    # Seedance 2.5: when task type is 'video editing', ratio must be 'adaptive' and duration -1
+    is_v25 = SEEDANCE_MODEL >= "dreamina-seedance-2-5"
     body = {"model": SEEDANCE_MODEL, "content": content,
-            "ratio": "3:4", "duration": duration, "seed": seed,
+            "ratio": "adaptive" if is_v25 else "3:4",
+            "duration": -1 if is_v25 else duration,
+            "seed": seed,
             "camera_fixed": False, "watermark": False}
     if resolution:
         body["resolution"] = resolution

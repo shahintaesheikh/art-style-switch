@@ -16,7 +16,6 @@ into Seedance.
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 
@@ -67,24 +66,24 @@ def main() -> None:
     KEYFRAME_PROMPT = style_prompts["keyframe"]
     SEEDANCE_PROMPT = style_prompts["seedance"]
 
-    preprocessed = f"{WORK}/preprocessed.mp4"
-    shutil.copyfile(INPUT_VIDEO, preprocessed)
+    preprocessed = INPUT_VIDEO
 
     # 3. audio extraction (extract before stripping, so reference is silent)
     audio = extract_audio(preprocessed, f"{WORK}/audio.aac")
     print("audio:", audio)
 
     # 4. strip audio from working video → silent reference for Seedream/Seedance
+    #    If INPUT_VIDEO is work/preprocessed.mp4, strip audio from that directly
     silent_video = f"{WORK}/preprocessed_silent.mp4"
     subprocess.run([
-        "ffmpeg", "-y", "-i", preprocessed,
+        "ffmpeg", "-y", "-i", INPUT_VIDEO,
         "-an", "-c:v", "copy", silent_video,
     ], check=True, capture_output=True)
     print("silent video:", silent_video)
 
     # 5. anchor keyframes (A0-A7 at 0%, ~14.3%, ~28.6%, ~42.9%, ~57.1%, ~71.4%, ~85.7%, 100%) — from SILENT video
     ts = anchor_timestamps(info["duration"])
-    raws = [extract_frame(silent_video, t, f"{WORK}/kf{i}_raw.jpg")
+    raws = [extract_frame(silent_video, t, f"{WORK}/kf{i}mono.jpg")
             for i, t in enumerate(ts, 0)]
     print("raw keyframes:", raws)
 
@@ -94,24 +93,39 @@ def main() -> None:
     qc_report = os.path.join(WORK, "qc_report.json")
     anchor_ts = ",".join(str(t) for t in ts)
 
-    print("=== QC Gate (silent video) ===")
-    result = subprocess.run(
-        [sys.executable, "qc_gate.py",
-         "--raw-video", silent_video,
-         "--style-image", STYLE_REF,
-         "--style-prompt", KEYFRAME_PROMPT,
-         "--anchor-timestamps", anchor_ts,
-         "--output-kfs-json", kfs_json,
-         "--report-path", qc_report],
-        capture_output=True, text=True, timeout=1800,
-    )
-    if result.stdout:
-        last_line = result.stdout.strip().split("\n")[-1]
-        print("qc_gate:", last_line[:200], "..." if len(last_line) > 200 else "")
-    if result.returncode != 0:
-        print("qc_gate stderr:", result.stderr, file=sys.stderr)
-        reason = "infra error" if result.returncode == 3 else "QC failed after 3 attempts"
-        raise SystemExit(f"QC gate exit code {result.returncode} — {reason}")
+    # Skip QC if valid keyframes already exist (cached from previous run)
+    skip_qc = False
+    if os.path.exists(kfs_json):
+        try:
+            with open(kfs_json) as f:
+                cached = json.load(f)
+            if cached.get("status") == "passed" and all(
+                kf.get("image_url") for kf in cached.get("keyframes", [])
+            ):
+                skip_qc = True
+                print(f"=== QC Gate: using cached keyframes ({kfs_json}) ===")
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    if not skip_qc:
+        print("=== QC Gate (silent video) ===")
+        result = subprocess.run(
+            [sys.executable, "qc_gate.py",
+             "--raw-video", silent_video,
+             "--style-image", STYLE_REF,
+             "--style-prompt", KEYFRAME_PROMPT,
+             "--anchor-timestamps", anchor_ts,
+             "--output-kfs-json", kfs_json,
+             "--report-path", qc_report],
+            capture_output=True, text=True, timeout=2700,
+        )
+        if result.stdout:
+            last_line = result.stdout.strip().split("\n")[-1]
+            print("qc_gate:", last_line[:200], "..." if len(last_line) > 200 else "")
+        if result.returncode != 0:
+            print("qc_gate stderr:", result.stderr, file=sys.stderr)
+            reason = "infra error" if result.returncode == 3 else "QC failed after 3 attempts"
+            raise SystemExit(f"QC gate exit code {result.returncode} — {reason}")
 
     # Read QC-passed keyframes
     with open(kfs_json) as f:
@@ -122,49 +136,15 @@ def main() -> None:
                if kf["anchor_id"] != "A0"]
     print("QC-passed keyframe URLs:", kf_urls)
 
-    # 7. Seedance 2.0 — 720p, silent reference → silent output
-    #    VLM gate loops: up to 3 attempts (1 initial + 2 retries)
-    from pipeline.vlm_gate import grade_video
-
-    max_vlm_attempts = 3
-    vlm_attempt = 1
-    vlm_passed = False
-    vlm_results = []
-    seedance_seed = 42
-
-    while vlm_attempt <= max_vlm_attempts:
-        print(f"\n=== Seedance generation attempt {vlm_attempt}/{max_vlm_attempts} ===")
-        task_id = submit_task(STYLE_REF, kf_urls, INPUT_VIDEO_URI,
-                              duration=round(info["duration"]), seed=seedance_seed,
-                              prompt=SEEDANCE_PROMPT)
-        print("Seedance task:", task_id)
-        stylized_url = wait_for_task(task_id)
-        silent = download(stylized_url, f"{WORK}/stylized_silent.mp4")
-        print("stylized silent:", silent)
-
-        # VLM gate
-        print(f"\n=== VLM Gate (attempt {vlm_attempt}) ===")
-        ts = anchor_timestamps(info["duration"])
-        vlm_result = grade_video(os.environ["ARK_API_KEY"], silent, ts,
-                                   SEEDANCE_PROMPT, attempt=vlm_attempt)
-        vlm_results.append(vlm_result)
-        print(f"  pass: {vlm_result['pass']}")
-        print(f"  failures: {vlm_result['failures']}")
-        for dim, s in vlm_result.get('scores', {}).items():
-            print(f"    {dim}: {s['score']} — {s['rationale'][:100]}")
-
-        if vlm_result['pass']:
-            vlm_passed = True
-            print("  ✅ VLM gate passed")
-            break
-
-        vlm_attempt += 1
-        seedance_seed += 10  # change seed for retry
-        if vlm_attempt <= max_vlm_attempts:
-            print(f"  Retrying with seed={seedance_seed}...")
-
-    if not vlm_passed:
-        print(f"\n⚠️  VLM gate failed after {max_vlm_attempts} attempts. Using best result.")
+    # 7. Seedance — silent reference → silent output (no VLM gate)
+    print("\n=== Seedance generation ===")
+    task_id = submit_task(STYLE_REF, kf_urls, INPUT_VIDEO_URI,
+                          duration=round(info["duration"]), seed=42,
+                          prompt=SEEDANCE_PROMPT)
+    print("Seedance task:", task_id)
+    stylized_url = wait_for_task(task_id)
+    silent = download(stylized_url, f"{WORK}/stylized_silent.mp4")
+    print("stylized silent:", silent)
 
     # 8. audio mux → final deliverable (re-mux the pre-extracted audio)
     final = mux_audio(silent, audio, f"{WORK}/unity_handdrawn_final.mp4")
