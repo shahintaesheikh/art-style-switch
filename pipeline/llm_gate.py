@@ -44,6 +44,44 @@ VLM_MODEL = os.environ.get("LLM_GATE_MODEL", "dola-seed-2-1-turbo-260628")
 INFERENCE_BASE_URL = "https://ark.ap-southeast.bytepluses.com/api/v3"
 
 # ---------------------------------------------------------------------------
+# SerpAPI configuration — art style/medium web image search tool
+# ---------------------------------------------------------------------------
+
+SERPAPI_BASE_URL = "https://serpapi.com/search"
+SERPAPI_API_KEY = os.environ.get("SERPAPI_API_KEY", "")
+
+SERPAPI_IMAGE_SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_art_style_references",
+        "description": (
+            "Search Google Images for additional visual references of a specific art style "
+            "and medium. Only search for style/medium attributes (line work, texture, color "
+            "treatment, shading, physical medium and substrate). NEVER include subjects, "
+            "objects, actions, compositions, or scene descriptions in the query."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Search query describing only the art style and medium. "
+                        "Examples: 'pencil sketch cross-hatching hand-drawn paper texture', "
+                        "'watercolor painting loose wash paper texture', "
+                        "'charcoal drawing smudged value study', "
+                        "'ink wash sumi-e brush stroke', "
+                        "'oil pastel impasto canvas texture'"
+                    ),
+                }
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+# ---------------------------------------------------------------------------
 # System prompt for the style-analysis VLM call
 # ---------------------------------------------------------------------------
 
@@ -149,8 +187,18 @@ def b64_data_uri(path: str) -> str:
     return f"data:image/jpeg;base64,{b64}"
 
 
+def _parse_json_response(text: str) -> dict:
+    """Strip markdown fences from a model response and parse JSON."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    return json.loads(cleaned)
+
+
 # ---------------------------------------------------------------------------
-# VLM call
+# VLM call — initial reference image analysis
 # ---------------------------------------------------------------------------
 
 def _call_vlm_analyze(api_key: str, image_path: str,
@@ -182,15 +230,175 @@ def _call_vlm_analyze(api_key: str, image_path: str,
     r.raise_for_status()
     body = r.json()
     text = body["choices"][0]["message"]["content"]
+    return _parse_json_response(text)
 
-    # Strip markdown fences if present
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    if cleaned.startswith("```json"):
-        cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
-    return json.loads(cleaned)
+# ---------------------------------------------------------------------------
+# SerpAPI tool — search for additional art style / medium references
+# ---------------------------------------------------------------------------
+
+def _serpapi_search_images(query: str, num_results: int = 3) -> list[dict]:
+    """Execute a Google Images search via SerpAPI for style/medium
+    references. Returns up to *num_results* image result dicts.
+
+    Each result contains: title, source, thumbnail, original URL, width, height.
+    """
+    params = {
+        "engine": "google_images",
+        "q": query,
+        "api_key": SERPAPI_API_KEY,
+        "ijn": 0,
+        "safe": "active",
+    }
+    resp = requests.get(SERPAPI_BASE_URL, params=params, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+
+    if data.get("search_metadata", {}).get("status") == "Error":
+        error_msg = data.get("error", "Unknown SerpAPI error")
+        raise RuntimeError(f"SerpAPI error: {error_msg}")
+
+    images = data.get("images_results", [])[:num_results]
+    return [
+        {
+            "title": img.get("title", ""),
+            "source": img.get("source", ""),
+            "thumbnail": img.get("thumbnail", ""),
+            "original": img.get("original", ""),
+            "width": img.get("original_width"),
+            "height": img.get("original_height"),
+        }
+        for img in images
+    ]
+
+
+def _call_llm_enrich_with_function_call(api_key: str,
+                                        initial_analysis: dict) -> dict:
+    """Use the BytePlus function-calling protocol to let the LLM search
+    SerpAPI for additional art style / medium reference images, then produce
+    an enriched style analysis.
+
+    The LLM always calls ``search_art_style_references`` (mandated by the
+    system prompt). The SerpAPI results are fed back as a ``tool`` role
+    message, and the LLM returns the final enriched JSON.
+
+    Returns the enriched analysis dict (same schema as initial_analysis plus
+    ``web_style_references``). If anything fails, falls back to the original
+    analysis with an empty ``web_style_references`` list.
+    """
+    if not SERPAPI_API_KEY:
+        print("  [SerpAPI] SERPAPI_API_KEY not set — skipping web enrichment")
+        initial_analysis["web_style_references"] = []
+        return initial_analysis
+
+    messages = [
+        {"role": "system", "content": WEB_ENRICHMENT_SYSTEM_PROMPT},
+        {"role": "user",
+         "content": json.dumps(initial_analysis, indent=2,
+                                ensure_ascii=False)},
+    ]
+    tools = [SERPAPI_IMAGE_SEARCH_TOOL]
+
+    try:
+        # Pass 1: LLM decides the search query
+        r = requests.post(
+            f"{INFERENCE_BASE_URL}/chat/completions",
+            headers=_headers(api_key),
+            json={
+                "model": VLM_MODEL,
+                "messages": messages,
+                "tools": tools,
+                "max_tokens": 4096,
+                "temperature": 0.3,
+            },
+            timeout=60,
+        )
+        r.raise_for_status()
+        body = r.json()
+        choice = body["choices"][0]
+
+        if choice["finish_reason"] != "tool_calls" or \
+           not choice["message"].get("tool_calls"):
+            print("  [SerpAPI] model did not call the tool — skipping")
+            initial_analysis["web_style_references"] = []
+            return initial_analysis
+
+        tool_call = choice["message"]["tool_calls"][0]
+        args = json.loads(tool_call["function"]["arguments"])
+        query = args.get("query", "")
+        print(f"  [SerpAPI] searching for: {query}")
+
+        # Execute the search
+        references = _serpapi_search_images(query, num_results=3)
+        print(f"  [SerpAPI] got {len(references)} results")
+
+        # Append assistant message (with tool_calls) then tool result
+        messages.append(choice["message"])
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": json.dumps({"image_results": references},
+                                   indent=2, ensure_ascii=False),
+        })
+
+        # Pass 2: LLM produces enriched analysis
+        r2 = requests.post(
+            f"{INFERENCE_BASE_URL}/chat/completions",
+            headers=_headers(api_key),
+            json={
+                "model": VLM_MODEL,
+                "messages": messages,
+                "tools": tools,  # keep tools available
+                "max_tokens": 4096,
+                "temperature": 0.3,
+            },
+            timeout=60,
+        )
+        r2.raise_for_status()
+        body2 = r2.json()
+        text = body2["choices"][0]["message"]["content"]
+
+        enriched = _parse_json_response(text)
+        enriched["web_style_references"] = [
+            ref["original"] for ref in references
+        ]
+        return enriched
+
+    except Exception as exc:
+        print(f"  [SerpAPI] enrichment failed: {exc} — falling back to initial analysis")
+        initial_analysis["web_style_references"] = []
+        return initial_analysis
+
+
+# ---------------------------------------------------------------------------
+# Web enrichment — function-calling step for SerpAPI style/medium references
+# ---------------------------------------------------------------------------
+
+WEB_ENRICHMENT_SYSTEM_PROMPT = """\
+You are a professional art director. You have received an initial style analysis of a reference image.
+
+Your task: use the search_art_style_references tool to find ADDITIONAL web references for this art style and medium.
+
+Rules:
+- Always call the search_art_style_references tool with a well-crafted query.
+- The query must describe only art style and medium attributes (e.g., line technique, texture, color treatment, shading style, physical medium and substrate).
+- NEVER include subjects, objects, actions, compositions, or scene descriptions.
+- After receiving the search results, produce an enriched JSON style analysis that incorporates
+  insights from the web references. Use the same JSON schema as the initial analysis, plus a
+  "web_style_references" field listing the returned image URLs.
+
+Output exactly one JSON object with no prose, no markdown fences:
+{
+  "style_label": "...",
+  "medium": "...",
+  "line_work": "...",
+  "color_palette": "...",
+  "shading_technique": "...",
+  "texture": "...",
+  "key_visual_elements": ["..."],
+  "web_style_references": ["https://...", "https://..."]
+}
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +501,11 @@ def generate_style_prompts(api_key: str, style_ref_path: str,
     """
     analysis = _call_vlm_analyze(api_key, style_ref_path, timeout=timeout)
 
-    # Fill in the prompt templates
+    # Enrich the style analysis with web references via function calling
+    enriched_analysis = _call_llm_enrich_with_function_call(api_key, analysis)
+
+    # Fill in the prompt templates (use enriched analysis)
+    analysis = enriched_analysis
     keyframe_prompt = KEYFRAME_PROMPT_TEMPLATE.format(
         style_label=analysis.get("style_label", "hand-drawn style"),
         medium=analysis.get("medium", ""),
