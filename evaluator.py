@@ -595,12 +595,6 @@ def run_evaluator_round(client: ArkClient, agent_id: str, env_id: str,
                 send_message(client, session_id,
                              [{"type": "text", "text": SCHEMA_RETRY_NUDGE}])
             else:
-                # Debug: dump raw evaluator output to file for inspection
-                import os
-                dump_path = os.path.join(os.environ.get("WORK_DIR", "work"), "evaluator_raw_output.txt")
-                with open(dump_path, "w") as df:
-                    df.write(text)
-                print(f"[DEBUG] Raw evaluator output dumped to {dump_path} ({len(text)} chars)", flush=True)
                 raise EvaluatorInfraError(
                     "evaluator_parse",
                     f"evaluator output invalid after schema-retry nudge: {e}") from e
