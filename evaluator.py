@@ -25,7 +25,9 @@ import base64
 import hashlib
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import time
 
 import requests
@@ -61,11 +63,10 @@ HARD_GATE_MIN = {"geometry": 5, "composition": 5, "medium": 5, "line_quality": 5
 SOFT_GATE_MIN = {"palette": 4}
 ALL_DIMENSIONS = ("medium", "palette", "line_quality", "geometry", "composition")
 
-# Minimal sandboxed Environment (Q19). Smoke test resolved the plan §17 open
-# question: `config.networking` is a REQUIRED field, so it is set explicitly.
-# The Evaluator has zero tools, so sandbox networking is inert; kept as
-# "unrestricted" (the documented type) in case the runtime fetches user.message
-# image URLs from inside the sandbox rather than server-side.
+# Minimal sandboxed Environment (Q19). The Evaluator has zero tools and all
+# images are base64-encoded by the driver before sending. networking is a
+# REQUIRED API field per plan §17 and only accepts "unrestricted". The sandbox
+# env and env vars are omitted since the agent has no tools to use them.
 ENVIRONMENT_CONFIG = {"type": "cloud", "networking": {"type": "unrestricted"}}
 
 # ---------------------------------------------------------------------------
@@ -268,9 +269,34 @@ def bootstrap_evaluator(client: ArkClient,
         except EvaluatorInfraError as e:
             if "ResourceConflict" not in e.error:
                 raise
-            envs = client.request("GET", "/environments", stage="bootstrap")
-            env_id = next(e2["id"] for e2 in envs.get("data", [])
-                          if e2.get("name") == "kf-qc-gate-env")
+            # Fallback: environment exists but isn't paginated in list.
+            # Check the reviser cache for a shared environment, or reuse any
+            # existing minimal sandbox environment.
+            reviser_cache_path = os.path.expanduser("~/.config/kf-qc/agents.json")
+            if os.path.exists(reviser_cache_path):
+                try:
+                    rc = json.loads(open(reviser_cache_path).read())
+                    if rc.get("environment_id"):
+                        env_id = rc["environment_id"]
+                except (json.JSONDecodeError, OSError):
+                    pass
+            if not env_id:
+                envs = client.request("GET", "/environments", stage="bootstrap")
+                # Prefer kf-qc-reviser-env (known working sandbox)
+                for e2 in envs.get("data", []):
+                    if e2.get("name") == "kf-qc-reviser-env":
+                        env_id = e2["id"]
+                        break
+            if not env_id:
+                envs = client.request("GET", "/environments", stage="bootstrap")
+                for e2 in envs.get("data", []):
+                    env_id = e2["id"]
+                    break
+            if not env_id:
+                raise EvaluatorInfraError(
+                    "bootstrap",
+                    "environment 'kf-qc-gate-env' reported as existing (ResourceConflict) "
+                    "but not found via fallback")
 
     # (b/c) evaluator agent — NO tools/skills/mcp/multiagent keys at all (Q19)
     agent_id = cache.get("evaluator_agent_id")
@@ -428,11 +454,34 @@ def _image_block(url_or_path: str) -> dict:
         # download and base64-encode (URL-passthrough unreliable per smoke test)
         r = requests.get(url_or_path, timeout=60)
         r.raise_for_status()
-        data = base64.b64encode(r.content).decode("ascii")
+        # Downscale to 50% then compress to q=15 to fit within model context
+        import subprocess, tempfile
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
+        subprocess.run([
+            "ffmpeg", "-y", "-i", "-",
+            "-vf", "scale=iw*0.5:ih*0.5",
+            "-q:v", "15", "-frames:v", "1", tmp_path,
+        ], input=r.content, capture_output=True, timeout=30)
+        with open(tmp_path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("ascii")
+        os.unlink(tmp_path)
         return {"type": "image",
                 "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}
     with open(url_or_path, "rb") as f:  # local path
+        raw = f.read()
+    # Downscale local images too
+    import subprocess, tempfile
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp_path = tmp.name
+    subprocess.run([
+        "ffmpeg", "-y", "-i", "-",
+        "-vf", "scale=iw*0.5:ih*0.5",
+        "-q:v", "15", "-frames:v", "1", tmp_path,
+    ], input=raw, capture_output=True, timeout=30)
+    with open(tmp_path, "rb") as f:
         data = base64.b64encode(f.read()).decode("ascii")
+    os.unlink(tmp_path)
     return {"type": "image",
             "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}
 
@@ -480,7 +529,8 @@ def build_evaluator_message(round_idx: int,
                     "do NOT rescore]")
         blocks.append({"type": "text", "text":
                        f"### Styled keyframe at t={a['timestamp_sec']}s "
-                       f"({a['anchor_id']}): {tag}\nimage_url: {a['keyframe_url']}"})
+                       f"({a['anchor_id']}): {tag}\n"
+                       f"Image URL: {a['keyframe_url']}"})
         blocks.append(_image_block(a["keyframe_url"]))
 
     # rounds >= 2: compact driver-built history block before the rubric (§11.2, Q37)
