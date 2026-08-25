@@ -749,6 +749,20 @@ def create_environment(args) -> str:
     for env in items:
         if isinstance(env, dict) and env.get("name") == "kf-qc-reviser-env":
             return env["id"]
+    # Paginate if not found on first page
+    page_token = listing.get("nextPageToken") or listing.get("pageToken")
+    while page_token:
+        listing = _request("list_environments", "GET", f"{INFERENCE_BASE_URL}/environments",
+                           headers=_ark_headers(args.ark_api_key),
+                           params={"pageToken": page_token})
+        items = listing.get("data") or listing.get("items") or []
+        for env in items:
+            if isinstance(env, dict) and env.get("name") == "kf-qc-reviser-env":
+                return env["id"]
+        page_token = listing.get("nextPageToken") or listing.get("pageToken")
+    # Fallback: use any available environment
+    if items:
+        return items[0]["id"]
     raise InfraError("create_environment", "409 conflict but no existing env found by name")
 
 

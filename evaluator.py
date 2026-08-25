@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import html
 import json
 import os
 import subprocess
@@ -529,8 +530,7 @@ def build_evaluator_message(round_idx: int,
                     "do NOT rescore]")
         blocks.append({"type": "text", "text":
                        f"### Styled keyframe at t={a['timestamp_sec']}s "
-                       f"({a['anchor_id']}): {tag}\n"
-                       f"Image URL: {a['keyframe_url']}"})
+                       f"({a['anchor_id']}): {tag}"})
         blocks.append(_image_block(a["keyframe_url"]))
 
     # rounds >= 2: compact driver-built history block before the rubric (§11.2, Q37)
@@ -582,6 +582,8 @@ def parse_evaluator_json(text: str) -> dict:
                 raise ValueError(f"keyframe entry missing key: {key}")
         if kf["anchor_id"] not in ANCHOR_IDS:
             raise ValueError(f"unknown anchor_id: {kf['anchor_id']}")
+        # Unescape HTML entities in image_url (evaluator may encode & as &amp;)
+        kf["image_url"] = html.unescape(kf["image_url"])
         scores = kf["scores"]
         for dim in ALL_DIMENSIONS:
             if dim not in scores:

@@ -16,8 +16,11 @@ into Seedance.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+from datetime import datetime
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
@@ -45,6 +48,74 @@ def download(url: str, out: str) -> str:
             for chunk in r.iter_content(1 << 16):
                 f.write(chunk)
     return out
+
+
+def _download_failed_keyframes(qc_report_path: str, failed_dir: Path, stamp: str) -> None:
+    """Read the QC report JSON and download every regenerated keyframe
+    as a JPG into ``failed_dir / f\"keyframes_{stamp}\"``."""
+    kf_dest = failed_dir / f"keyframes_{stamp}"
+    kf_dest.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(qc_report_path) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        print(f"  [warn] could not read QC report {qc_report_path} — skipping image download")
+        return
+
+    seen: set[str] = set()
+    count = 0
+
+    # Final keyframes (the last attempted versions)
+    for kf in data.get("final_keyframes", []):
+        url = kf.get("image_url", "") or kf.get("keyframe_url", "")
+        if url and url not in seen:
+            seen.add(url)
+            fname = f"{kf['anchor_id']}_final.jpg"
+            _dl_one(url, kf_dest / fname)
+            count += 1
+
+    # All rounds
+    for rnd in data.get("rounds", []):
+        rnum = rnd["round"]
+        for kf in rnd.get("round_0_keyframes", []):
+            url = kf.get("keyframe_url", "")
+            if url and url not in seen:
+                seen.add(url)
+                fname = f"{kf['anchor_id']}_r{rnum}_round0.jpg"
+                _dl_one(url, kf_dest / fname)
+                count += 1
+        for kf in rnd.get("delta", {}).get("regenerated", []):
+            url = kf.get("keyframe_url", "")
+            if url and url not in seen:
+                seen.add(url)
+                fname = f"{kf['anchor_id']}_r{rnum}_gen.jpg"
+                _dl_one(url, kf_dest / fname)
+                count += 1
+        for action in rnd.get("reviser_actions", []):
+            if action.get("tool") == "generate_keyframe":
+                url = action.get("result", {}).get("keyframe_url", "")
+                if url and url not in seen:
+                    seen.add(url)
+                    aid = action["input"]["anchor_id"]
+                    seed = action["result"].get("seed", "?")
+                    fname = f"{aid}_r{rnum}_reviser_s{seed}.jpg"
+                    _dl_one(url, kf_dest / fname)
+                    count += 1
+
+    if count:
+        print(f"  -> Downloaded {count} keyframe images to {kf_dest}/")
+
+
+def _dl_one(url: str, path: Path) -> None:
+    """Download a single keyframe URL to *path*."""
+    try:
+        r = requests.get(url, stream=True, timeout=30)
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(1 << 16):
+                f.write(chunk)
+    except Exception as exc:
+        print(f"  [warn] failed to download {path.name}: {exc}")
 
 
 def main() -> None:
@@ -124,6 +195,24 @@ def main() -> None:
             print("qc_gate:", last_line[:200], "..." if len(last_line) > 200 else "")
         if result.returncode != 0:
             print("qc_gate stderr:", result.stderr, file=sys.stderr)
+            # Archive failed run artifacts (JSON + actual keyframe images)
+            failed_dir = Path(WORK) / "failed"
+            failed_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            for src, label in [
+                (qc_report, "qc_report"),
+                (kfs_json, "qc_keyframes"),
+            ]:
+                p = Path(src)
+                if p.exists():
+                    shutil.copy2(p, failed_dir / f"{label}_{stamp}.json")
+            # Also copy the latest prompt log if it exists
+            prompt_logs = sorted(Path(WORK, "prompts_log").glob("prompt_llm_gate_*.txt"), reverse=True)
+            if prompt_logs:
+                shutil.copy2(prompt_logs[0], failed_dir / f"prompt_llm_gate_{stamp}.txt")
+            # Download actual keyframe JPGs from the QC report
+            _download_failed_keyframes(qc_report, failed_dir, stamp)
+            print(f"  -> Failed artifacts archived in {failed_dir}/")
             reason = "infra error" if result.returncode == 3 else "QC failed after 3 attempts"
             raise SystemExit(f"QC gate exit code {result.returncode} — {reason}")
 
@@ -147,7 +236,8 @@ def main() -> None:
     print("stylized silent:", silent)
 
     # 8. audio mux → final deliverable (re-mux the pre-extracted audio)
-    final = mux_audio(silent, audio, f"{WORK}/unity_handdrawn_final.mp4")
+    style_name = Path(STYLE_REF).stem.lower()
+    final = mux_audio(silent, audio, f"{WORK}/unity_handdrawn_noserp.mp4")
     print("DONE →", final)
     print("final probe:", probe(final))
 
