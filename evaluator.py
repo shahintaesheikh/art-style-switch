@@ -258,7 +258,7 @@ def bootstrap_evaluator(client: ArkClient,
                 int(cache.get("evaluator_version", 1)),
                 cache["environment_id"])
 
-    # (a) environment — idempotent: on name conflict, reuse the existing one
+    # (a) idempotent enivronment id
     env_id = cache.get("environment_id")
     if not env_id:
         try:
